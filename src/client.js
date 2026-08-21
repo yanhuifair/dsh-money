@@ -5,11 +5,16 @@
  *  - conversation.composer.dock：输入区下方统计行（余额 / 本对话，金色徽章）
  *  - conversation.chat.assistant-actions：每条回复费用标签（紧跟分支按钮右侧，悬停显示明细）
  *  - settings.general.item：费用显示货币设置行（对齐官方 General 排版）
+ *  - 侧边栏 DOM 注入：工作区行（div[role=treeitem][aria-expanded]）总费用徽章
+ *  - 侧边栏底部余额：DOM 注入行，插在 cordis（footerActions）与设置（settingsArea）之间
  *
  * 布局技巧：renderSlot 的插槽容器是 div[data-slot=...]（display: contents），
  * 费用 span 在其内部，与时间戳（外层 flex 容器最后一个子元素）不是兄弟；
  * 用 :has() 从插槽容器出发选中外层 flex 容器的最后子元素（时间戳），把 order 提到费用之上，
  * 得到 [复制][反馈][分支][费用][时间戳]。
+ *
+ * 防卡死：侧边栏 MutationObserver 注入徽章时先 disconnect 再写 DOM、写毕重新 observe，
+ * 避免自身写入触发观察器回调造成无限循环；观察范围收窄到 sidebar 容器。
  */
 
 export default {
@@ -90,21 +95,21 @@ export default {
       return '¥ ';
     }
 
-    // 费用按 overview 解析出的币种格式化（金额单位：¥ 元 / $ 美元）
+    // 费用格式化：估算值带 ~ 前缀，按大小自适应精度
     function fmtMoney(v, currency) {
       if (v == null || !Number.isFinite(v)) return '—';
       const sym = moneySymbol(currency);
-      if (v === 0) return sym + '0.00';
-      if (v >= 1) return sym + v.toFixed(2);
-      if (v >= 0.01) return sym + v.toFixed(4);
-      return sym + v.toFixed(6).replace(/0+$/, '');
+      if (v === 0) return '~' + sym + '0.00';
+      if (v >= 1) return '~' + sym + v.toFixed(2);
+      if (v >= 0.01) return '~' + sym + v.toFixed(4);
+      return '~' + sym + v.toFixed(6).replace(/0+$/, '');
     }
     function fmtBalance(b) {
       if (!b || b.total == null || !Number.isFinite(b.total)) return '—';
       const sym = b.currency === 'CNY' ? '¥ ' : b.currency === 'USD' ? '$' : (b.currency + ' ');
       return sym + b.total.toFixed(2);
     }
-    // token 数量统一带单位（token）
+    // 所有数据带单位：token
     function fmtTokens(n) {
       if (n == null || !Number.isFinite(n)) return '—';
       if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M token';
@@ -112,11 +117,11 @@ export default {
       return String(n) + ' token';
     }
 
-    // 每次回复的悬停明细：费用（带币种）+ 模型 + token 拆分（全部带单位）
+    // 每条回复的悬停明细
     function replyTooltip(r, currency) {
       if (!r) return '本次回复费用';
       const sym = moneySymbol(currency);
-      const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元）' : '（美元）')];
+      const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，估算）' : '（美元，估算）')];
       if (r.model) lines.push('模型: ' + r.model);
       if (r.tokens) {
         lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
@@ -127,7 +132,7 @@ export default {
       return lines.join('\n');
     }
 
-    // 输入区下方的读出行：余额 / 本对话费用（金色标签风格）
+    // ---- 输入区下方统计行：仅本对话费用（余额看侧边栏品牌行下方）----
     function CostDock(props) {
       const sessionId = props.sessionId;
       const session = props.session;
@@ -143,16 +148,9 @@ export default {
       }, [sessionId, turns, nodes]);
       const o = overview || {};
       const currency = o.currency || 'CNY';
-      const children = [
-        React.createElement('span', {
-          key: 'bal',
-          title: '账号剩余金额（自动刷新）',
-          style: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
-        },
-          '余额 ',
-          React.createElement('span', { style: badgeStyle }, fmtBalance(o.balance)),
-        ),
-        React.createElement('span', { key: 'sep', style: { opacity: 0.4 } }, '·'),
+      return React.createElement('div', {
+        style: { display: 'flex', gap: '10px', alignItems: 'center', fontSize: '11px', opacity: 0.85, padding: '2px 0', whiteSpace: 'nowrap' },
+      },
         React.createElement('span', {
           key: 'conv',
           title: '本对话累计费用（估算）',
@@ -161,13 +159,10 @@ export default {
           '本对话 ',
           React.createElement('span', { style: badgeStyle }, fmtMoney(o.conversationCost, currency)),
         ),
-      ];
-      return React.createElement('div', {
-        style: { display: 'flex', gap: '10px', alignItems: 'center', fontSize: '11px', opacity: 0.85, padding: '2px 0', whiteSpace: 'nowrap' },
-      }, children);
+      );
     }
 
-    // 每条回复旁的本次费用：紧跟分支按钮右侧（时间戳仍最右），金色标签
+    // ---- 每条回复的费用标签（分支按钮右侧）----
     function ReplyCost(props) {
       const sessionId = props.sessionId;
       const messageId = props.messageId;
@@ -196,7 +191,131 @@ export default {
       }, fmtMoney(reply.cost, currency));
     }
 
-    // 设置行：费用显示货币（对齐官方 General 设置行排版：左侧标题区 + 右侧胶囊 selector）
+    // ---- 侧边栏 DOM 注入（v6：工作区行徽章 + 底部余额行插在 cordis 与设置之间）----
+    let observer = null;
+    let injected = false;
+    let applying = false;
+    let wsTable = null;
+    let wsContainer = null;
+    let balance = null;
+    let balanceLoaded = false;
+
+    function loadWsTable() {
+      host.call('cost/workspaces-all', {})
+        .then((res) => {
+          if (res && typeof res === 'object' && !res.error) {
+            wsTable = res;
+            applyBadges();
+          }
+        })
+        .catch(() => {});
+    }
+
+    function loadBalance() {
+      host.call('cost/balance', {})
+        .then((res) => {
+          if (res && typeof res === 'object' && !res.error) {
+            balance = res.balance || null;
+            balanceLoaded = true;
+            applyBadges();
+          }
+        })
+        .catch(() => {});
+    }
+
+    // 余额行：插到 settingsArea（设置）之后，即侧边栏最底部
+    function renderBalanceRow() {
+      if (!balanceLoaded) return;
+      // 窄条（collapsed）时品牌名不渲染，隐藏余额
+      const brandName = document.querySelector('[data-slot="sidebar.brand.name"]');
+      const settingsSlot = document.querySelector('[data-slot="sidebar.settings"]');
+      let row = document.querySelector('.dsh-money-balance-row');
+      if (!brandName || !settingsSlot || !settingsSlot.parentElement || !settingsSlot.parentElement.parentElement) {
+        if (row) row.remove();
+        return;
+      }
+      const settingsArea = settingsSlot.parentElement;
+      const footArea = settingsArea.parentElement;
+      const text = '余额 ' + fmtBalance(balance);
+      const tip = '账号剩余金额（自动刷新）';
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'dsh-money-balance-row';
+        row.style.cssText = 'color:#f0c11d;font-size:11px;padding:2px 12px;border-radius:8px;background:rgba(128,128,128,0.12);margin:2px 0 0;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;text-align:left;';
+        footArea.insertBefore(row, settingsArea.nextSibling);
+      }
+      if (row.textContent !== text) row.textContent = text;
+      if (row.title !== tip) row.title = tip;
+    }
+
+    function applyBadges() {
+      if (applying) return;
+      applying = true;
+      // 写入期间暂停观察，防止自触发死循环
+      if (observer) { try { observer.disconnect(); } catch (e) {} }
+      try {
+        if (typeof document === 'undefined') return;
+        renderBalanceRow();
+        if (!wsTable || !Array.isArray(wsTable.workspaces)) return;
+        wsContainer = document.querySelector('[data-slot="sidebar.workspaces"]') || document.body;
+        const rows = wsContainer.querySelectorAll('div[role="treeitem"][aria-expanded]');
+        const byTitle = new Map(wsTable.workspaces.map((w) => [w.title, w]));
+        for (const row of rows) {
+          let label = '';
+          const spans = row.querySelectorAll('span');
+          for (const sp of spans) {
+            const t = (sp.textContent || '').trim();
+            if (t && t.length > 1 && !t.includes('¥') && !t.includes('$')) { label = t; break; }
+          }
+          if (!label) continue;
+          const entry = byTitle.get(label);
+          let badge = row.querySelector('.dsh-money-ws-badge');
+          if (!entry || entry.cost == null) {
+            if (badge) badge.remove();
+            continue;
+          }
+          const text = fmtMoney(entry.cost, wsTable.currency);
+          const tip = '工作区「' + label + '」总费用: ' + text + '（估算）\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);
+          if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'dsh-money-ws-badge';
+            badge.style.cssText = 'color:#f0c11d;font-size:11px;padding:0 4px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;';
+            row.appendChild(badge);
+          }
+          if (badge.textContent !== text) badge.textContent = text;
+          if (badge.title !== tip) badge.title = tip;
+        }
+      } catch (e) {
+        // 忽略 DOM 竞态
+      } finally {
+        applying = false;
+        // 重新观察（仅侧边栏容器）
+        if (observer && wsContainer) {
+          try { observer.observe(wsContainer, { childList: true, subtree: true }); } catch (e) {}
+        }
+      }
+    }
+
+    function startSidebarObserver() {
+      if (injected) return;
+      injected = true;
+      loadWsTable();
+      loadBalance();
+      if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+        observer = new MutationObserver(() => { applyBadges(); });
+        const root = document.querySelector('[data-slot="sidebar"]') || document.body;
+        wsContainer = root;
+        observer.observe(root, { childList: true, subtree: true });
+      }
+      const disposeRefresh = ctx.interval(() => loadBalance(), 60000);
+      ctx.effect(() => disposeRefresh);
+    }
+
+    ctx.effect(() => () => {
+      if (observer) { try { observer.disconnect(); } catch (e) {} observer = null; }
+    });
+
+    // ---- 设置面板：费用显示货币 ----
     const CURRENCY_LABELS = {
       auto: '自动（跟随余额）',
       CNY: '人民币 ¥',
@@ -222,6 +341,8 @@ export default {
         host.call('cost/config', { currency: next })
           .then(() => {
             setCurrency(next);
+            loadWsTable();
+            loadBalance();
             for (const sid of Array.from(bySession.keys())) refresh(sid);
           })
           .catch(() => {});
@@ -279,5 +400,7 @@ export default {
       { name: 'settings.general.item', id: 'cost-currency', order: 30 },
       () => React.createElement(CurrencySettingRow),
     ));
+
+    startSidebarObserver();
   },
 };

@@ -4,7 +4,8 @@
  * 功能：
  *  - 账号余额：GET {baseURL}/user/balance（60 秒缓存）
  *  - 会话费用：折叠会话日志 assistant/message 事件的 token usage，按官方价目表计价
- *  - RPC：cost/overview（费用总览）、cost/config（显示币种设置）
+ *  - RPC：cost/overview（费用总览）、cost/config（显示币种设置）、
+ *    cost/balance（侧边栏余额）、cost/workspaces-all（全量工作区费用表）
  *
  * 计价口径（DeepSeek 官方价格页 2026-08 版，高峰价 = 空闲价 × 2）：
  *  高峰时段 = 北京时间 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00）
@@ -172,6 +173,30 @@ export default {
       return { replies, conversationCost: hasCost ? total : null };
     }
 
+    // ---- 全量工作区费用表（供侧边栏工作区行注入）----
+    async function allWorkspaceCosts(currency) {
+      const registry = ctx.get('workspaceRegistry');
+      if (!registry) return { workspaces: [] };
+      let list = [];
+      try { list = registry.list(); } catch (e) { return { workspaces: [] }; }
+      const workspaces = [];
+      for (const w of list) {
+        const sessionIds = w.sessionIds || [];
+        let total = 0;
+        let hasCost = false;
+        for (const sid of sessionIds) {
+          const fold = await foldSession(sid, currency);
+          if (fold.conversationCost != null) { total += fold.conversationCost; hasCost = true; }
+        }
+        workspaces.push({
+          title: typeof w.title === 'string' ? w.title : '',
+          cost: hasCost ? total : null,
+          sessionCount: sessionIds.length,
+        });
+      }
+      return { workspaces };
+    }
+
     // 客户端读取/设置显示货币
     harness.handle('cost/config', async (args) => {
       const value = args && typeof args === 'object' ? args.currency : undefined;
@@ -180,6 +205,12 @@ export default {
         balanceCache = { at: 0, value: null };
       }
       return { currency: currencySetting };
+    });
+
+    // 侧边栏品牌行下方余额
+    harness.handle('cost/balance', async (args) => {
+      const balance = await cachedBalance();
+      return { balance };
     });
 
     harness.handle('cost/overview', async (args) => {
@@ -202,6 +233,17 @@ export default {
           model: r.model,
           tokens: r.tokens,
         })),
+      };
+    });
+
+    // 侧边栏工作区行注入用：全量工作区费用表
+    harness.handle('cost/workspaces-all', async (args) => {
+      const balance = await cachedBalance();
+      const currency = resolveCurrency(balance);
+      const data = await allWorkspaceCosts(currency);
+      return {
+        currency,
+        workspaces: data.workspaces,
       };
     });
   },
