@@ -74,17 +74,23 @@ usage: input 736 / cacheRead 492,928 / output 816
 
 ## 安装
 
-> **说明**：本插件以 **DSH 动态 Cordis 插件**形式运行（host/client 双半段，依赖动态沙箱注入的 `harness`/`host`/`styles`/`React` 等全局）。npm 包用于**获取源码**；安装后仍需按方式一在会话中定义。`pnpm add` 直接挂载为静态插件暂不支持。
+> **说明**：本插件以 **DSH 动态 Cordis 插件**形式运行（host/client 双半段，依赖动态沙箱注入的 `harness`/`host`/`styles`/`React` 等全局）。npm 包（`dsh-money`）提供插件源码；安装后需在会话中定义（见方式一/二）。当前版本 **1.0.1**。
 
-### 方式一：动态插件（推荐，零依赖）
+### 方式一：动态插件（推荐）
 
 在 DSH 会话中让 Agent 执行 `cordis_define` 定义插件，代码见 [`src/host.js`](src/host.js)（host 半段）与 [`src/client.js`](src/client.js)（client 半段），然后批准 `cordis_run`。重启后需重新定义。
 
-### 方式二：通过 npm 获取源码
+### 方式二：通过 npm 安装
 
 ```bash
 npm i dsh-money          # 或 pnpm add dsh-money
 # 包内 src/host.js 与 src/client.js 即插件代码，按方式一定义
+```
+
+**更新到最新版**：
+
+```bash
+npm update dsh-money     # 或 pnpm update dsh-money
 ```
 
 ### 方式三：直接 clone 仓库
