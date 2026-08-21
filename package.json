@@ -1,0 +1,46 @@
+{
+  "name": "dsh-money",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness 费用追踪插件：显示账号余额、当前对话费用与每次回复费用，金色标签风格，支持币种切换",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "src/host.js",
+  "types": "src/types.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/types.d.ts",
+      "default": "./src/host.js"
+    },
+    "./host": "./src/host.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "cost",
+    "billing",
+    "token",
+    "费用",
+    "余额"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yanhuifair/dsh-money.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yanhuifair/dsh-money/issues"
+  },
+  "homepage": "https://github.com/yanhuifair/dsh-money#readme",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
