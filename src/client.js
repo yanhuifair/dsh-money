@@ -2,7 +2,7 @@
  * dsh-money — Client 半段
  *
  * UI：
- *  - conversation.composer.dock：输入区下方统计行（余额 / 本对话 / 上次回复，金色徽章）
+ *  - conversation.composer.dock：输入区下方统计行（余额 / 本对话，金色徽章）
  *  - conversation.chat.assistant-actions：每条回复费用标签（紧跟分支按钮右侧，悬停显示明细）
  *  - settings.general.item：费用显示货币设置行（对齐官方 General 排版）
  *
@@ -127,7 +127,7 @@ export default {
       return lines.join('\n');
     }
 
-    // 输入区下方的读出行：余额 / 本对话费用 / 上次回复费用（全部为金色标签风格）
+    // 输入区下方的读出行：余额 / 本对话费用（金色标签风格）
     function CostDock(props) {
       const sessionId = props.sessionId;
       const session = props.session;
@@ -143,9 +143,6 @@ export default {
       }, [sessionId, turns, nodes]);
       const o = overview || {};
       const currency = o.currency || 'CNY';
-      const replies = o.replies || [];
-      const lastReply = replies.length ? replies[replies.length - 1] : null;
-      const last = o.lastReplyCost != null ? o.lastReplyCost : (lastReply ? lastReply.cost : null);
       const children = [
         React.createElement('span', {
           key: 'bal',
@@ -155,7 +152,7 @@ export default {
           '余额 ',
           React.createElement('span', { style: badgeStyle }, fmtBalance(o.balance)),
         ),
-        React.createElement('span', { key: 'sep1', style: { opacity: 0.4 } }, '·'),
+        React.createElement('span', { key: 'sep', style: { opacity: 0.4 } }, '·'),
         React.createElement('span', {
           key: 'conv',
           title: '本对话累计费用（估算）',
@@ -163,15 +160,6 @@ export default {
         },
           '本对话 ',
           React.createElement('span', { style: badgeStyle }, fmtMoney(o.conversationCost, currency)),
-        ),
-        React.createElement('span', { key: 'sep2', style: { opacity: 0.4 } }, '·'),
-        React.createElement('span', {
-          key: 'last',
-          title: lastReply ? replyTooltip(lastReply, currency) : '上次回复费用（估算）',
-          style: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
-        },
-          '上次回复 ',
-          React.createElement('span', { style: badgeStyle }, fmtMoney(last, currency)),
         ),
       ];
       return React.createElement('div', {
