@@ -1,7 +1,7 @@
 # dsh-money
 > DeepSeek Harness 费用追踪插件 —— 实时显示账号余额、当前对话费用与每次回复费用，全部金额以金色（`#f0c11d`）标签（徽章）风格展示，估算费用带 `~` 符号。
 
-![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![Agent](https://img.shields.io/badge/dsh-DeepSeek%20Harness-blueviolet.svg)  ![dsh-plugin](https://img.shields.io/badge/dsh-plugin-0.1.0-green.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)  ![pnpm](https://img.shields.io/badge/pnpm-7.0.0-blue.svg)
 
 显示 DeepSeek Harness 账号余额、当前对话费用与每次回复费用
 ![alt text](Snipaste_2026-08-21_11-56-59.png)
@@ -54,26 +54,25 @@
 
 ## 安装
 
-### 方式一：dsh 插件（推荐）
+> **说明**：本插件以 **DSH 动态 Cordis 插件**形式运行（host/client 双半段，依赖动态沙箱注入的 `harness`/`host`/`styles`/`React` 等全局）。npm 包用于**获取源码**；安装后仍需按方式一在会话中定义。`pnpm add` 直接挂载为静态插件暂不支持。
+
+### 方式一：动态插件（推荐，零依赖）
+
+在 DSH 会话中让 Agent 执行 `cordis_define` 定义插件，代码见 [`src/host.js`](src/host.js)（host 半段）与 [`src/client.js`](src/client.js)（client 半段），然后批准 `cordis_run`。重启后需重新定义。
+
+### 方式二：通过 npm 获取源码
 
 ```bash
-# 进入你的 dsh 配置目录（本机示例）
-cd ~/.dsh/profiles/web
-
-# 安装本插件
-pnpm add dsh-money
+npm i dsh-money          # 或 pnpm add dsh-money
+# 包内 src/host.js 与 src/client.js 即插件代码，按方式一定义
 ```
 
-安装后在配置中添加插件行（详见 [cordis 文档](https://github.com/deepseek-ai/deepseek-harness)）：
+### 方式三：直接 clone 仓库
 
-```yaml
-plugins:
-  - dsh-money
+```bash
+git clone https://github.com/yanhuifair/dsh-money.git
+# 使用 src/ 下的代码按方式一定义
 ```
-
-### 方式二：动态插件（手动定义）
-
-在 DSH 会话中让 Agent 执行 `cordis_define` 定义插件，代码见 [`src/host.js`](src/host.js)（host 半段）与 [`src/client.js`](src/client.js)（client 半段）。
 
 ## 配置
 
