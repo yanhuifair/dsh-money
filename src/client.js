@@ -4,7 +4,7 @@
  * UI：
  *  - conversation.composer.dock：输入区下方统计行（余额 / 本对话 / 上次回复，金色徽章）
  *  - conversation.chat.assistant-actions：每条回复费用标签（紧跟分支按钮右侧，悬停显示明细）
- *  - settings.general.item：费用显示货币设置行
+ *  - settings.general.item：费用显示货币设置行（对齐官方 General 排版）
  *
  * 布局技巧：renderSlot 的插槽容器是 div[data-slot=...]（display: contents），
  * 费用 span 在其内部，与时间戳（外层 flex 容器最后一个子元素）不是兄弟；
@@ -71,7 +71,7 @@ export default {
     }
 
     // 所有金钱文字统一金色 + 标签（徽章）风格
-    const GOLD = '#d4af37';
+    const GOLD = '#f0c11d';
     const badgeStyle = {
       color: GOLD,
       fontSize: '11px',
@@ -83,13 +83,14 @@ export default {
       cursor: 'default',
     };
 
+    // 币种符号：¥ 后带空格
     function moneySymbol(currency) {
-      if (currency === 'CNY') return '¥';
+      if (currency === 'CNY') return '¥ ';
       if (currency === 'USD') return '$';
-      return '¥';
+      return '¥ ';
     }
 
-    // 费用按 overview 解析出的币种格式化
+    // 费用按 overview 解析出的币种格式化（金额单位：¥ 元 / $ 美元）
     function fmtMoney(v, currency) {
       if (v == null || !Number.isFinite(v)) return '—';
       const sym = moneySymbol(currency);
@@ -100,20 +101,22 @@ export default {
     }
     function fmtBalance(b) {
       if (!b || b.total == null || !Number.isFinite(b.total)) return '—';
-      const sym = b.currency === 'CNY' ? '¥' : b.currency === 'USD' ? '$' : (b.currency + ' ');
+      const sym = b.currency === 'CNY' ? '¥ ' : b.currency === 'USD' ? '$' : (b.currency + ' ');
       return sym + b.total.toFixed(2);
     }
+    // token 数量统一带单位（token）
     function fmtTokens(n) {
-      if (n == null || !Number.isFinite(n)) return '0';
-      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-      return String(n);
+      if (n == null || !Number.isFinite(n)) return '—';
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M token';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K token';
+      return String(n) + ' token';
     }
 
-    // 每次回复的悬停明细：模型 + token 拆分
+    // 每次回复的悬停明细：费用（带币种）+ 模型 + token 拆分（全部带单位）
     function replyTooltip(r, currency) {
       if (!r) return '本次回复费用';
-      const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency)];
+      const sym = moneySymbol(currency);
+      const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元）' : '（美元）')];
       if (r.model) lines.push('模型: ' + r.model);
       if (r.tokens) {
         lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
@@ -205,7 +208,17 @@ export default {
       }, fmtMoney(reply.cost, currency));
     }
 
-    // 设置行：费用显示货币（自动 / 人民币 / 美元）
+    // 设置行：费用显示货币（对齐官方 General 设置行排版：左侧标题区 + 右侧胶囊 selector）
+    const CURRENCY_LABELS = {
+      auto: '自动（跟随余额）',
+      CNY: '人民币 ¥',
+      USD: '美元 $',
+    };
+    const CURRENCY_DESCS = {
+      auto: '余额为美元则按美元价目显示，否则按人民币',
+      CNY: '费用按人民币价目表计算（¥ / 元）',
+      USD: '费用按美元价目表计算（$ / 美元）',
+    };
     function CurrencySettingRow() {
       const [value, setValue] = React.useState(currencySetting);
       React.useEffect(() => {
@@ -228,14 +241,40 @@ export default {
       const select = React.createElement('select', {
         value,
         onChange,
-        style: { background: 'transparent', color: 'inherit', border: '1px solid currentColor', borderRadius: '4px', padding: '2px 4px', fontSize: '12px' },
+        style: {
+          background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.08))',
+          height: '36px',
+          font: 'inherit',
+          color: 'var(--dsw-alias-label-primary, inherit)',
+          cursor: 'pointer',
+          border: 'none',
+          borderRadius: '18px',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '0 14px',
+          fontSize: '14px',
+          lineHeight: '22px',
+          outline: 'none',
+          appearance: 'auto',
+        },
       },
-        React.createElement('option', { value: 'auto' }, '自动（跟随余额）'),
-        React.createElement('option', { value: 'CNY' }, '人民币 ¥'),
-        React.createElement('option', { value: 'USD' }, '美元 $'),
+        React.createElement('option', { value: 'auto' }, CURRENCY_LABELS.auto),
+        React.createElement('option', { value: 'CNY' }, CURRENCY_LABELS.CNY),
+        React.createElement('option', { value: 'USD' }, CURRENCY_LABELS.USD),
       );
-      return React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0' } },
-        React.createElement('span', null, '费用显示货币'),
+      return React.createElement('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '16px 0',
+          borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))',
+        },
+      },
+        React.createElement('div', { style: { flexDirection: 'column', flex: '1', gap: '4px', minWidth: '0', paddingRight: '48px', display: 'flex' } },
+          React.createElement('div', { style: { color: 'var(--dsw-alias-label-primary, inherit)', fontSize: '14px', fontWeight: '400', lineHeight: '22px' } }, '费用显示货币'),
+          React.createElement('div', { style: { color: 'var(--dsw-alias-label-tertiary, rgba(128,128,128,0.7))', fontSize: '12px', lineHeight: '18px' } }, CURRENCY_DESCS[value] || CURRENCY_DESCS.auto),
+        ),
         select,
       );
     }
