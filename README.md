@@ -1,8 +1,20 @@
 # dsh-money
-
 > DeepSeek Harness 费用追踪插件 —— 实时显示账号余额、当前对话费用与每次回复费用，全部金额以金色标签（徽章）风格展示。
 
 ![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)
+
+显示 DeepSeek Harness 账号余额、当前对话费用与每次回复费用
+![alt text](Snipaste_2026-08-21_11-56-59.png)
+
+鼠标悬停能显示详细信息
+![alt text](Snipaste_2026-08-21_11-57-19.png)
+
+插件形式加载
+![alt text](Snipaste_2026-08-21_11-55-51.png)
+
+设置货币类型
+![alt text](Snipaste_2026-08-21_11-54-51.png)
+
 
 ## 功能
 
@@ -91,3 +103,7 @@ src/
 [GNU Affero General Public License v3.0](LICENSE) © yanhuifair
 
 AGPL-3.0 是强 copyleft 协议：你可以自由使用、修改与分发，但基于本插件的修改版本必须同样以 AGPL-3.0 开源，并保留版权声明。
+
+## 微信打赏
+真的很需要大家的支持和鼓励
+![alt text](tip.JPG)
