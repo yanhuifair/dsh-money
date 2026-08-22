@@ -244,7 +244,7 @@ function apply(ctx) {
     if (!row) {
       row = document.createElement('div');
       row.className = 'dsh-money-balance-row';
-      row.style.cssText = 'color:#f0c11d;font-size:11px;padding:2px 12px;border-radius:8px;background:rgba(128,128,128,0.12);margin:2px 0 0;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;text-align:left;';
+      row.style.cssText = 'color:#f0c11d;font-size:11px;padding:2px 12px;border-radius:8px;background:rgba(128,128,128,0.12);margin:2px 0 0;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;text-align:left;align-self:flex-start;max-width:100%;';
       footArea.insertBefore(row, settingsArea.nextSibling);
     }
     if (row.textContent !== text) row.textContent = text;
