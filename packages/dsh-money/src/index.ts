@@ -164,63 +164,74 @@ export default class MoneyCostService extends TypertRemoteService {
     return balance && balance.currency === 'USD' ? 'USD' : 'CNY';
   }
 
-  /** 会话折叠结果缓存：避免反复读取大会话日志（key = sessionId + currency） */
-  private foldCache = new Map<string, { at: number; value: { replies: MoneyReplyCost[]; conversationCost: number | null } }>();
+  /** 会话折叠增量状态：记录最后处理的 seq，只折叠新增事件（key = sessionId + currency） */
+  private foldCache = new Map<string, { replies: MoneyReplyCost[]; conversationCost: number | null; lastSeq: number }>();
   private readonly FOLD_TTL_MS = 60000;
 
-  /** 折叠会话：逐条 assistant/message 计价并求和（带 60s 缓存） */
+  /** 折叠会话：增量处理（只读新增事件并追加，避免重复遍历整个日志） */
   private async foldSession(
     sessionId: string,
     currency: 'CNY' | 'USD',
   ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
     const key = sessionId + '::' + currency;
     const cached = this.foldCache.get(key);
-    const now = Date.now();
-    if (cached && now - cached.at < this.FOLD_TTL_MS) return cached.value;
-    const value = await this.foldSessionUncached(sessionId, currency);
-    // 清理过期项，防止无限增长
-    if (this.foldCache.size > 200) {
-      for (const [k, v] of this.foldCache) {
-        if (now - v.at >= this.FOLD_TTL_MS) this.foldCache.delete(k);
-      }
-    }
-    this.foldCache.set(key, { at: now, value });
-    return value;
-  }
-
-  /** 无缓存折叠实现 */
-  private async foldSessionUncached(
-    sessionId: string,
-    currency: 'CNY' | 'USD',
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
-    const sessionQuery = this.ctx.get('sessionQuery') as { readSession(id: string): Promise<{ events?: unknown[] } | undefined> } | undefined;
-    if (!sessionQuery) return { replies: [], conversationCost: null };
-    let events: unknown[] = [];
+    const sessionQuery = this.ctx.get('sessionQuery') as { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> } | undefined;
+    if (!sessionQuery) return cached ? cached : { replies: [], conversationCost: null };
+    let events: Array<Record<string, unknown> & { seq?: number }> = [];
     try {
       const snap = await sessionQuery.readSession(sessionId);
-      events = snap && Array.isArray(snap.events) ? snap.events : [];
+      events = snap && Array.isArray(snap.events) ? (snap.events as Array<Record<string, unknown> & { seq?: number }>) : [];
     } catch (e) {
-      return { replies: [], conversationCost: null };
+      return cached ? { replies: cached.replies, conversationCost: cached.conversationCost } : { replies: [], conversationCost: null };
     }
+    // 增量：从缓存的 lastSeq 之后继续；无缓存则全量
+    const fromSeq = cached ? cached.lastSeq : -1;
+    const freshReplies: MoneyReplyCost[] = cached ? [...cached.replies] : [];
+    let total = cached ? (cached.conversationCost ?? 0) : 0;
+    let hasCost = cached ? cached.conversationCost != null : false;
+    // 只处理 seq > fromSeq 的新增事件
+    const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number') ? e.seq > fromSeq : true) : events;
+    const fold = await this.foldEvents(newEvents, currency, freshReplies, total, hasCost, cached ? true : false);
+    // 更新缓存（重置 TTL）
+    this.foldCache.set(key, {
+      replies: fold.replies,
+      conversationCost: fold.conversationCost,
+      lastSeq: this.maxSeq(events),
+    });
+    return { replies: fold.replies, conversationCost: fold.conversationCost };
+  }
+
+  /** 批量折叠事件（分片异步处理，避免长任务阻塞事件循环） */
+  private async foldEvents(
+    events: Array<Record<string, unknown> & { seq?: number }>,
+    currency: 'CNY' | 'USD',
+    replies: MoneyReplyCost[],
+    total: number,
+    hasCost: boolean,
+    incremental: boolean,
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
+    const timer = this.ctx.get('timer') as { timeout(ms: number): Promise<void> } | undefined;
     let lastModel = 'deepseek-v4-flash';
-    const replies: MoneyReplyCost[] = [];
-    let total = 0;
-    let hasCost = false;
-    for (const ev of events) {
+    const CHUNK = 5000;
+    for (let i = 0; i < events.length; i++) {
+      if (i % CHUNK === 0 && i > 0) {
+        // 让出事件循环，使对话渲染等其他请求能穿插执行
+        if (timer) await timer.timeout(0);
+      }
+      const ev = events[i];
       if (!ev || typeof ev !== 'object') continue;
-      const event = ev as Record<string, unknown>;
-      if (event.type === 'request/context' && event.data && typeof (event.data as Record<string, unknown>).model === 'string') {
-        lastModel = (event.data as Record<string, unknown>).model as string;
+      if (ev.type === 'request/context' && ev.data && typeof (ev.data as Record<string, unknown>).model === 'string') {
+        lastModel = (ev.data as Record<string, unknown>).model as string;
         continue;
       }
-      if (event.type !== 'assistant/message') continue;
-      const data = (event.data || {}) as Record<string, unknown>;
+      if (ev.type !== 'assistant/message') continue;
+      const data = (ev.data || {}) as Record<string, unknown>;
       const message = (data.message || {}) as Record<string, unknown>;
       const source = (message.source || {}) as Record<string, unknown>;
       const model =
         typeof source.model === 'string' ? source.model : lastModel;
       const usage = (data.usage || {}) as Record<string, unknown>;
-      const price = priceOf(model, typeof event.time === 'number' ? event.time : Date.now(), currency);
+      const price = priceOf(model, typeof ev.time === 'number' ? ev.time : Date.now(), currency);
       const cost = costOf(usage, price);
       if (cost != null) {
         total += cost;
@@ -240,6 +251,14 @@ export default class MoneyCostService extends TypertRemoteService {
       });
     }
     return { replies, conversationCost: hasCost ? total : null };
+  }
+
+  private maxSeq(events: Array<Record<string, unknown> & { seq?: number }>): number {
+    let m = -1;
+    for (const e of events) {
+      if (e && typeof e.seq === 'number' && e.seq > m) m = e.seq;
+    }
+    return m;
   }
 
   /** 全量工作区费用表 */

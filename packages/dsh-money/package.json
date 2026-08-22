@@ -1,6 +1,6 @@
 {
   "name": "dsh-money",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "DeepSeek Harness 费用追踪插件：显示账号余额、当前对话费用与每次回复费用，金色标签风格，支持币种切换",
   "license": "AGPL-3.0",
   "publishConfig": {

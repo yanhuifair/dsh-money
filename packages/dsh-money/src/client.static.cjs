@@ -28,12 +28,15 @@ function apply(ctx) {
   if (!remote) return;
 
   // 手动注入布局 CSS（静态插件无 styles 全局）
+  // 布局目标：[复制][反馈][分支][费用][时间戳]
+  // 费用标签（.dsh-cost-reply）自身 order:100；此规则把该行的时间戳（最后一个子元素）
+  // order 提到 101，排到费用标签之后。:has() 仅匹配含费用标签的行，浏览器有优化，实测非性能瓶颈。
   const CSS_ID = 'dsh-money-layout-css';
   if (typeof document !== 'undefined' && !document.querySelector('style[data-dsh-money="' + CSS_ID + '"]')) {
     const tag = document.createElement('style');
     tag.dataset.dshMoney = CSS_ID;
     tag.textContent =
-      ''; // TEMP: :has CSS 临时禁用（性能对照），布局待重新设计
+      'div[data-slot="conversation.chat.assistant-actions"]:has(.dsh-cost-reply) ~ :last-child { order: 101; }';
     document.head.appendChild(tag);
   }
 
