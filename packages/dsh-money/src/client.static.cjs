@@ -303,10 +303,20 @@ function apply(ctx) {
     loadWsTable();
     loadBalance();
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
-      observer = new MutationObserver(() => { applyBadges(); });
+      // 节流：侧边栏高频 DOM 变化（滚动/展开）合并为一次 applyBadges，避免频繁全量扫描
+      let badgeTimer = null;
+      const scheduleBadges = () => {
+        if (badgeTimer) return;
+        badgeTimer = setTimeout(() => {
+          badgeTimer = null;
+          applyBadges();
+        }, 150);
+      };
+      observer = new MutationObserver(() => { scheduleBadges(); });
       const root = document.querySelector('[data-slot="sidebar"]') || document.body;
       wsContainer = root;
       observer.observe(root, { childList: true, subtree: true });
+      ctx.effect(() => () => { if (badgeTimer) { clearTimeout(badgeTimer); badgeTimer = null; } });
     }
     const disposeRefresh = ctx.interval(() => loadBalance(), 60000);
     ctx.effect(() => disposeRefresh);

@@ -164,8 +164,32 @@ export default class MoneyCostService extends TypertRemoteService {
     return balance && balance.currency === 'USD' ? 'USD' : 'CNY';
   }
 
-  /** 折叠会话：逐条 assistant/message 计价并求和 */
+  /** 会话折叠结果缓存：避免反复读取大会话日志（key = sessionId + currency） */
+  private foldCache = new Map<string, { at: number; value: { replies: MoneyReplyCost[]; conversationCost: number | null } }>();
+  private readonly FOLD_TTL_MS = 60000;
+
+  /** 折叠会话：逐条 assistant/message 计价并求和（带 60s 缓存） */
   private async foldSession(
+    sessionId: string,
+    currency: 'CNY' | 'USD',
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
+    const key = sessionId + '::' + currency;
+    const cached = this.foldCache.get(key);
+    const now = Date.now();
+    if (cached && now - cached.at < this.FOLD_TTL_MS) return cached.value;
+    const value = await this.foldSessionUncached(sessionId, currency);
+    // 清理过期项，防止无限增长
+    if (this.foldCache.size > 200) {
+      for (const [k, v] of this.foldCache) {
+        if (now - v.at >= this.FOLD_TTL_MS) this.foldCache.delete(k);
+      }
+    }
+    this.foldCache.set(key, { at: now, value });
+    return value;
+  }
+
+  /** 无缓存折叠实现 */
+  private async foldSessionUncached(
     sessionId: string,
     currency: 'CNY' | 'USD',
   ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
@@ -256,6 +280,7 @@ export default class MoneyCostService extends TypertRemoteService {
     if (value === 'CNY' || value === 'USD' || value === 'auto') {
       this.currencySetting = value;
       this.balanceCache = { at: 0, value: null };
+      this.foldCache.clear();
     }
     return { currency: this.currencySetting };
   }
