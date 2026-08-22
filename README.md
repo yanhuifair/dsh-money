@@ -77,7 +77,7 @@ usage: input 736 / cacheRead 492,928 / output 816
 
 ## 安装
 
-> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.1**。
+> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.5**。
 
 ### 前置条件
 
@@ -208,6 +208,7 @@ npm update dsh-money    # 或 pnpm update dsh-money
 | 启动报错 `result codec is not backed by a zod v4 schema` | 本地开发时 zod 版本必须为 **v4**（typert 生成器/loader 依赖 zod v4 的 `_zod` 标记）。确认根目录与 `packages/dsh-money/package.json` 均为 `"zod": "^4.x"`，然后 `npm install && npm run build` 后重启 DSH |
 | web boot 报 `dsh-money: pending (waiting for service: remote.moneyCost)` | 旧版 client bundle 未挂载 `moneyCost` 远端命名空间（`remote.<ns>` 必须由插件显式 `ctx.remote.$mount(TYPERT_REMOTE)` 才会创建）。升级到 **≥1.1.3**（构建走 esbuild 打包 client，自动挂载）；若仍复现，确认 profile 里装的是新包并重启 |
 | 启动报 `cannot get property "remote.moneyCost" without inject` | client 侧 `ctx.remote.moneyCost` 属性访问依赖该命名空间被 inject 绑定到当前 fiber 的 store（cordis 机制）。**≥1.1.4** 已修复：`$mount` 后经 `ctx.inject(['remote.moneyCost'], …)` 动态注入再启动 UI。升级并重启 |
+| 侧栏余额/工作区徽章不显示（dock 本对话与回复标签正常） | `workspacesAll`/`balance` 是无参 remote 端点，client 传了空对象 `{}` 会报 `expected 0 argument(s), got 1`。**≥1.1.5** 已修复。升级并重启 |
 
 ## 配置
 
