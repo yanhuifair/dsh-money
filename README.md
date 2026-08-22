@@ -42,13 +42,17 @@
 
 ### 计价口径
 
-基于 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（2026-08 版，峰值价 = 空闲价 × 2）：
+基于 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（**更新日期：2026-08**，峰值价 = 空闲价 × 2）：
 
 | 模型 | 币种 | 缓存命中（空闲） | 未命中（空闲） | 输出（空闲） |
 |---|---|---|---|---|
 | deepseek-v4-flash | ¥ / $ | 0.05 / 0.007 | 1.5 / 0.22 | 4.5 / 0.66 |
 | deepseek-v4-pro | ¥ / $ | 0.15 / 0.022 | 4.5 / 0.66 | 13.5 / 1.98 |
 
+> **价格来源**：[DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（中文）/ [Pricing 英文页](https://api-docs.deepseek.com/quick_start/pricing)。
+>
+> **更新日期**：2026-08（价格表在 `packages/dsh-money/src/index.ts` 的 `PRICES` 常量中，官方调价时需同步更新并升级版本）。
+>
 > 单位：每百万 token。高峰时段 = 北京时间 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00），价格翻倍。
 >
 > 账单口径：未命中输入（含 cache write）× miss 价 + 缓存命中 × hit 价 + 输出 × out 价。

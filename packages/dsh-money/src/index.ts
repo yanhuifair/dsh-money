@@ -22,7 +22,11 @@ import type {
   MoneyWorkspacesAll,
 } from './types.js';
 
-/** 每百万 token 单价：人民币与美元两套价目 */
+/**
+ * 每百万 token 单价：人民币与美元两套价目
+ * 来源：DeepSeek 官方价格页 https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+ * 更新日期：2026-08（官方调价时需同步更新并升级版本）
+ */
 const PRICES: Record<string, Record<string, { hit: number; miss: number; out: number }>> = {
   CNY: {
     'deepseek-v4-flash': { hit: 0.05, miss: 1.5, out: 4.5 },
