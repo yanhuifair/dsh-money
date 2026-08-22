@@ -1,0 +1,91 @@
+{
+  "name": "dsh-money",
+  "version": "1.1.0",
+  "description": "DeepSeek Harness 费用追踪插件：显示账号余额、当前对话费用与每次回复费用，金色标签风格，支持币种切换",
+  "license": "AGPL-3.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yanhuifair/dsh-money.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yanhuifair/dsh-money/issues"
+  },
+  "homepage": "https://github.com/yanhuifair/dsh-money#readme",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./types": {
+      "types": "./lib/types.d.ts",
+      "default": "./lib/types.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./typert": {
+      "types": "./lib/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    },
+    "./remote": {
+      "types": "./lib/typert.remote-client.d.ts",
+      "default": "./lib/typert.remote-client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/client.d.ts",
+    "lib/client.js",
+    "lib/index.d.ts",
+    "lib/index.js",
+    "lib/typert.host.d.ts",
+    "lib/typert.host.js",
+    "lib/typert.remote-client.d.ts",
+    "lib/typert.remote-client.d.ts.map",
+    "lib/typert.remote-client.js",
+    "lib/types.d.ts",
+    "lib/types.js"
+  ],
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "cost",
+    "billing",
+    "token",
+    "费用",
+    "余额"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.1-rc.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.1-rc.1",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-typert-generator": "^0.1.1-rc.1",
+    "@deepseek-ai/dsh-typert-loader": "^0.1.1-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.1-rc.1",
+    "@deepseek-ai/dsh-typert-registry": "^0.1.1-rc.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "zod": "^3.24.1"
+  }
+}

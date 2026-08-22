@@ -77,20 +77,23 @@ usage: input 736 / cacheRead 492,928 / output 816
 
 ## 安装
 
-> **说明**：本插件以 **DSH 动态 Cordis 插件**形式运行（host/client 双半段，依赖动态沙箱注入的 `harness`/`host`/`styles`/`React` 等全局）。npm 包（`dsh-money`）提供插件源码；安装后需在会话中定义（见方式一/二）。当前版本 **1.0.2**。
+> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle），`npm i` 后挂载一行即生效、重启不丢失。当前版本 **1.1.0**。
 
-### 方式一：动态插件（推荐）
-
-在 DSH 会话中让 Agent 执行 `cordis_define` 定义插件，代码见 [`src/host.js`](src/host.js)（host 半段）与 [`src/client.js`](src/client.js)（client 半段），然后批准 `cordis_run`。重启后需重新定义。
-
-> 💡 已提供 `load-money-plugin` 技能：新会话中直接说“加载 money 插件”，Agent 会自动从本地仓库读取最新代码定义并运行。
-
-### 方式二：通过 npm 安装
+### 安装步骤
 
 ```bash
 npm i dsh-money          # 或 pnpm add dsh-money
-# 包内 src/host.js 与 src/client.js 即插件代码，按方式一定义
 ```
+
+在 DSH profile 的 `cordis.patch.yml`（如 `~/.dsh/profiles/web/cordis.patch.yml`）中添加一行：
+
+```yaml
+- insert:
+    - id: money
+      name: 'dsh-money'
+```
+
+重启 DSH（或触发 profile 重载）后生效。**不再需要动态定义或技能**。
 
 **更新到最新版**：
 
@@ -98,11 +101,13 @@ npm i dsh-money          # 或 pnpm add dsh-money
 npm update dsh-money     # 或 pnpm update dsh-money
 ```
 
-### 方式三：直接 clone 仓库
+### 直接 clone 仓库（开发）
 
 ```bash
 git clone https://github.com/yanhuifair/dsh-money.git
-# 使用 src/ 下的代码按方式一定义
+cd dsh-money
+npm install
+npm run build            # 生成 lib/（typert 产物 + client bundle）
 ```
 
 ## 配置
@@ -127,12 +132,17 @@ cd dsh-money
 npm install
 ```
 
-插件源码结构：
+插件源码结构（monorepo）：
 
 ```
-src/
-├── host.js      # Host 半段：余额拉取 + 会话费用折叠 + RPC handler
-└── client.js    # Client 半段：金色标签 UI（dock 统计行 / 每次回复费用 / 侧边栏徽章 / 设置行）
+packages/dsh-money/
+├── src/
+│   ├── index.ts        # Host 半段：MoneyCostService（TypertRemoteService + @Remote）
+│   ├── types.ts        # Remote 边界类型（公开导出）
+│   ├── client.ts       # Client 半段类型入口
+│   └── client.static.js# Client 半段实现（__ModuleLoader__ bundle 源码）
+├── lib/                # 构建产物（typert.host.js / typert.remote-client.js / client.js / index.js）
+└── package.json        # dsh.client 声明 + ./typert ./remote 导出
 ```
 
 ## 许可证

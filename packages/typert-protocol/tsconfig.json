@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
+    "declaration": true, "outDir": "lib", "rootDir": "src", "skipLibCheck": true,
+    "esModuleInterop": true, "composite": true, "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/types/index.ts", "src/types/types.ts", "src/types/invariant.ts"]
+}

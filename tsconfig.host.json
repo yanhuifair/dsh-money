@@ -1,0 +1,22 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/dsh-money"
+    },
+    {
+      "path": "./packages/typert-protocol"
+    }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/dsh-typert-protocol": [
+        "packages/typert-protocol/src/types/index.ts"
+      ],
+      "@deepseek-ai/dsh-typert-protocol/types": [
+        "packages/typert-protocol/src/types/types.ts"
+      ]
+    }
+  }
+}
