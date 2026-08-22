@@ -3,13 +3,15 @@
  *  1. typert-generator 从 packages/dsh-money/src 分析生成
  *     packages/dsh-money/lib/typert.host.js + typert.remote-client.js
  *  2. tsc 编译 host 半段 → packages/dsh-money/lib/index.js + index.d.ts
- *  3. 生成 client bundle packages/dsh-money/lib/client.js（__ModuleLoader__ 格式）
+ *  3. esbuild 打包 client（client.entry.js + client.static.js + TYPERT_REMOTE + zod）
+ *     → packages/dsh-money/lib/client.js（__ModuleLoader__ 格式）
  */
 
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = join(root, 'packages', 'dsh-money');
@@ -51,22 +53,32 @@ for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/types.js', 'lib/t
   if (!existsSync(join(pkg, required))) throw new Error(`tsc 未生成 ${required}，构建失败`);
 }
 
-// 3. client bundle
-console.log('[3/3] 生成 client bundle → lib/client.js');
-const clientSrc = readFileSync(join(pkg, 'src', 'client.static.js'), 'utf8');
+// 3. client bundle（esbuild 聚合：TYPERT_REMOTE 贡献 + client.static.js UI 逻辑）
+console.log('[3/3] esbuild 打包 client → lib/client.js');
+const esbuildResult = await build({
+  entryPoints: [join(pkg, 'src', 'client.entry.js')],
+  bundle: true,
+  format: 'cjs',
+  platform: 'browser',
+  external: ['react'], // react 由 Web 端 __ModuleLoader__ 提供
+  write: false,
+  minify: false,
+  logLevel: 'warning',
+});
+const esbundle = esbuildResult.outputFiles[0].text;
 const bundle = `window.__ModuleLoader__.load({
 	id: "dsh-money",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-${clientSrc.split('\n').map((l) => '\t\t' + l).join('\n')}
+${esbundle.split('\n').map((l) => '\t\t' + l).join('\n')}
 		return module.exports;
 	}
 });
 `;
 writeFileSync(join(lib, 'client.js'), bundle);
-writeFileSync(join(lib, 'client.d.ts'), `export declare const inject: string[];\nexport declare function apply(ctx: any): void;\n`);
-console.log('  打包完成，大小: ' + bundle.length + ' bytes');
+writeFileSync(join(lib, 'client.d.ts'), `export declare const inject: string[];\nexport declare function apply(ctx: any): Promise<(() => Promise<void> | void) | undefined>;\n`);
+console.log('  打包完成，大小: ' + bundle.length + ' bytes（zod 已内联）');
 
 console.log('\n✅ 构建完成 → ' + lib);

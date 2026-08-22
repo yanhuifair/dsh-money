@@ -206,6 +206,7 @@ npm update dsh-money    # 或 pnpm update dsh-money
 | 币种不对 | 设置页 → General → 费用显示货币；重启后恢复“自动”为正常行为 |
 | 更新后没变化 | 重启 DSH 了吗？host 进程内的代码需要重启才换新 |
 | 启动报错 `result codec is not backed by a zod v4 schema` | 本地开发时 zod 版本必须为 **v4**（typert 生成器/loader 依赖 zod v4 的 `_zod` 标记）。确认根目录与 `packages/dsh-money/package.json` 均为 `"zod": "^4.x"`，然后 `npm install && npm run build` 后重启 DSH |
+| web boot 报 `dsh-money: pending (waiting for service: remote.moneyCost)` | 旧版 client bundle 未挂载 `moneyCost` 远端命名空间（`remote.<ns>` 必须由插件显式 `ctx.remote.$mount(TYPERT_REMOTE)` 才会创建）。升级到 **≥1.1.3**（构建走 esbuild 打包 client，自动挂载）；若仍复现，确认 profile 里装的是新包并重启 |
 
 ## 配置
 
@@ -230,13 +231,18 @@ npm run build          # 生成 packages/dsh-money/lib/（typert 产物 + client
 ```
 packages/dsh-money/
 ├── src/
-│   ├── index.ts        # Host 半段：MoneyCostService（TypertRemoteService + @Remote）
-│   ├── types.ts        # Remote 边界类型（公开导出）
-│   ├── client.ts       # Client 半段类型入口
-│   └── client.static.js# Client 半段实现（__ModuleLoader__ bundle 源码）
-├── lib/                # 构建产物（typert.host.js / typert.remote-client.js / client.js / index.js）
-└── package.json        # dsh.client 声明 + ./typert ./remote 导出
+│   ├── index.ts         # Host 半段：MoneyCostService（TypertRemoteService + @Remote）
+│   ├── types.ts         # Remote 边界类型（公开导出）
+│   ├── client.ts        # Client 半段类型入口（inject 声明）
+│   ├── client.entry.js  # Client 打包入口：ctx.remote.$mount(TYPERT_REMOTE) 挂载 moneyCost
+│   └── client.static.cjs# Client UI 实现（CommonJS，require('react')，经 ctx.remote.moneyCost.* 调 Host）
+├── lib/                 # 构建产物（typert.host.js / typert.remote-client.js / client.js / index.js）
+└── package.json         # dsh.client 声明 + ./typert ./remote 导出
 ```
+
+Client bundle 由 esbuild 聚合（`scripts/build.mjs` 第 3 步）：把 typert-generator 生成的
+`TYPERT_REMOTE` 贡献（含 zod v4 schema，内联进包）与 `client.static.cjs` 合入单一
+`lib/client.js`（`window.__ModuleLoader__.load` 格式，react 走外部 require）。
 
 ## 许可证
 

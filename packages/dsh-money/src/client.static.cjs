@@ -11,13 +11,17 @@
  * 与动态插件差异：无全局 host/styles/React；经 ctx.remote.moneyCost.* 调 Host，
  * React 由 require('react') 引入，CSS 手动注入 <style>。
  *
+ * 注意：本文件不直接声明 remote.moneyCost 依赖 —— 该命名空间由打包入口
+ * client.entry.js 在 apply() 中先 ctx.remote.$mount(TYPERT_REMOTE) 挂载，
+ * 挂载完成后此处 ctx.remote.moneyCost 才可用（inject 列表仅声明 remote）。
+ *
  * 防卡死：MutationObserver 注入徽章时先 disconnect 再写 DOM、写毕重新 observe。
  */
 
 const React = require('react');
 
-/** 依赖注入：slots 槽位注册、remote 命名空间、timer 定时器 */
-const inject = ['slots', 'remote', 'remote.moneyCost', 'timer'];
+/** 依赖注入：slots 槽位注册、remote 命名空间、timer 定时器（moneyCost 由入口挂载） */
+const inject = ['slots', 'remote', 'timer'];
 
 function apply(ctx) {
   const remote = ctx.remote.moneyCost;
