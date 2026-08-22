@@ -187,6 +187,8 @@ npm update dsh-money    # 或 pnpm update dsh-money
 
 然后**重启 DSH**（host 进程内的插件代码才会换新）。`cordis.patch.yml` 的挂载行无需改动。
 
+> **pnpm 供应链策略提示**：pnpm 默认启用 `minimumReleaseAge`（新版本发布后短时间内不安装，防供应链投毒）。若 `dsh plugin update` / `pnpm update` 提示「Already up to date」而 npm 上已有更新版本，属正常——等发布期过后再更新，或临时用 `npm update dsh-money` 绕过。
+>
 > 发布节奏见 [npm 页面](https://www.npmjs.com/package/dsh-money)；`dsh-money` 包内有完整的 `lib/` 构建产物（host 半段、client bundle、typert 清单），`npm update` 后无需额外构建。
 
 ## 卸载
