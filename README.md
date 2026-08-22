@@ -1,7 +1,7 @@
 # dsh-money
 > DeepSeek Harness 费用追踪插件 —— 实时显示账号余额、当前对话费用与每次回复费用，全部金额以金色（`#f0c11d`）标签（徽章）风格展示，估算费用带 `~` 符号。
 
-![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![Agent](https://img.shields.io/badge/dsh-DeepSeek%20Harness-blueviolet.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)  ![pnpm](https://img.shields.io/badge/pnpm-7.0.0-blue.svg)
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![dsh](https://img.shields.io/badge/dsh-DeepSeek%20Harness-blueviolet.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)  ![pnpm](https://img.shields.io/badge/pnpm-7.0.0-blue.svg) 
 
 显示 DeepSeek Harness 账号余额、当前对话费用与每次回复费用
 ![alt text](Snipaste_2026-08-23_03-25-22-1.png)
