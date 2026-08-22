@@ -1,16 +1,16 @@
 # dsh-money
 > DeepSeek Harness 费用追踪插件 —— 实时显示账号余额、当前对话费用与每次回复费用，全部金额以金色（`#f0c11d`）标签（徽章）风格展示，估算费用带 `~` 符号。
 
-![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![Agent](https://img.shields.io/badge/dsh-DeepSeek%20Harness-blueviolet.svg)  ![dsh-plugin](https://img.shields.io/badge/dsh-plugin-0.1.0-green.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)  ![pnpm](https://img.shields.io/badge/pnpm-7.0.0-blue.svg)
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![Agent](https://img.shields.io/badge/dsh-DeepSeek%20Harness-blueviolet.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)  ![pnpm](https://img.shields.io/badge/pnpm-7.0.0-blue.svg)
 
 显示 DeepSeek Harness 账号余额、当前对话费用与每次回复费用
-![alt text](Snipaste_2026-08-21_11-56-59.png)
+![alt text](Snipaste_2026-08-23_03-25-22-1.png)
 
 鼠标悬停能显示详细信息
 ![alt text](Snipaste_2026-08-21_11-57-19.png)
 
 插件形式加载
-![alt text](Snipaste_2026-08-21_11-55-51.png)
+![alt text](Snipaste_2026-08-23_03-22-23-1.png)
 
 设置货币类型
 ![alt text](Snipaste_2026-08-21_11-54-51.png)
@@ -27,7 +27,7 @@
 
 ### 界面
 
-- **侧边栏底部余额**：`余额 [¥ 110.00]`，位于设置按钮下方，金色徽章样式，60 秒自动刷新
+- **侧边栏底部余额**：`余额 [¥ 110.00]`，位于设置按钮下方，金色徽章样式（背景只包裹文字），60 秒自动刷新
 - **侧边栏工作区行**：每个工作区行右侧显示其总费用（如 `~¥ 8.72`），悬停显示会话数与估算说明
 - **输入框下方统计行**（`conversation.composer.dock`）：`本对话 [~¥ 8.7188]`，金色徽章样式，30 秒自动刷新
 - **每条回复费用标签**（`conversation.chat.assistant-actions`）：紧跟分支按钮右侧（时间戳保持最右），悬停显示模型与 token 明细（输入未命中 / 缓存命中 / 缓存写入 / 输出，全部带 `token` 单位）
@@ -77,7 +77,7 @@ usage: input 736 / cacheRead 492,928 / output 816
 
 ## 安装
 
-> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.5**。
+> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.6**。
 
 ### 前置条件
 
@@ -209,6 +209,7 @@ npm update dsh-money    # 或 pnpm update dsh-money
 | web boot 报 `dsh-money: pending (waiting for service: remote.moneyCost)` | 旧版 client bundle 未挂载 `moneyCost` 远端命名空间（`remote.<ns>` 必须由插件显式 `ctx.remote.$mount(TYPERT_REMOTE)` 才会创建）。升级到 **≥1.1.3**（构建走 esbuild 打包 client，自动挂载）；若仍复现，确认 profile 里装的是新包并重启 |
 | 启动报 `cannot get property "remote.moneyCost" without inject` | client 侧 `ctx.remote.moneyCost` 属性访问依赖该命名空间被 inject 绑定到当前 fiber 的 store（cordis 机制）。**≥1.1.4** 已修复：`$mount` 后经 `ctx.inject(['remote.moneyCost'], …)` 动态注入再启动 UI。升级并重启 |
 | 侧栏余额/工作区徽章不显示（dock 本对话与回复标签正常） | `workspacesAll`/`balance` 是无参 remote 端点，client 传了空对象 `{}` 会报 `expected 0 argument(s), got 1`。**≥1.1.5** 已修复。升级并重启 |
+| 余额标签背景占满整行宽度 | 余额行作为 flex 容器子项被默认 `align-items: stretch` 拉满。**≥1.1.6** 已修复（`align-self: flex-start`）。升级并重启 |
 
 ## 配置
 
@@ -224,8 +225,8 @@ npm update dsh-money    # 或 pnpm update dsh-money
 ```bash
 git clone https://github.com/yanhuifair/dsh-money.git
 cd dsh-money
-npm install            # 依赖要求 zod v4（typert 生成器/loader 校验 `_zod` 标记）
-npm run build          # 生成 packages/dsh-money/lib/（typert 产物 + client bundle）
+npm install
+npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + client bundle）
 ```
 
 插件源码结构（monorepo）：
@@ -233,18 +234,14 @@ npm run build          # 生成 packages/dsh-money/lib/（typert 产物 + client
 ```
 packages/dsh-money/
 ├── src/
-│   ├── index.ts         # Host 半段：MoneyCostService（TypertRemoteService + @Remote）
-│   ├── types.ts         # Remote 边界类型（公开导出）
-│   ├── client.ts        # Client 半段类型入口（inject 声明）
-│   ├── client.entry.js  # Client 打包入口：ctx.remote.$mount(TYPERT_REMOTE) 挂载 moneyCost
-│   └── client.static.cjs# Client UI 实现（CommonJS，require('react')，经 ctx.remote.moneyCost.* 调 Host）
-├── lib/                 # 构建产物（typert.host.js / typert.remote-client.js / client.js / index.js）
-└── package.json         # dsh.client 声明 + ./typert ./remote 导出
+│   ├── index.ts        # Host 半段：MoneyCostService（TypertRemoteService + @Remote）
+│   ├── types.ts        # Remote 边界类型（公开导出）
+│   ├── client.ts       # Client 半段类型入口
+│   ├── client.entry.js # Client 打包入口（esbuild 聚合 TYPERT_REMOTE + UI）
+│   └── client.static.cjs # Client UI 实现（slot 注册 + 侧栏 DOM 注入）
+├── lib/                # 构建产物（typert.host.js / typert.remote-client.js / client.js / index.js）
+└── package.json        # dsh.client 声明 + ./typert ./remote 导出
 ```
-
-Client bundle 由 esbuild 聚合（`scripts/build.mjs` 第 3 步）：把 typert-generator 生成的
-`TYPERT_REMOTE` 贡献（含 zod v4 schema，内联进包）与 `client.static.cjs` 合入单一
-`lib/client.js`（`window.__ModuleLoader__.load` 格式，react 走外部 require）。
 
 ## 许可证
 
