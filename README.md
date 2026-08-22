@@ -77,15 +77,34 @@ usage: input 736 / cacheRead 492,928 / output 816
 
 ## 安装
 
-> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle），`npm i` 后挂载一行即生效、重启不丢失。当前版本 **1.1.0**。
+> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.1**。
 
-### 安装步骤
+### 前置条件
+
+- 已安装并运行 DSH（DeepSeek Harness）Web 端
+- DeepSeek API Key 已配置（见下文「配置」；未配置则余额显示 `—`，费用仍正常计算）
+
+### 第一步：安装 npm 包
+
+在 **DSH profile 目录**（默认 `~/.dsh/profiles/web/`）执行：
 
 ```bash
-npm i dsh-money          # 或 pnpm add dsh-money
+# 方式 A：npm（最通用，npm 随 Node 一起安装）
+cd ~/.dsh/profiles/web
+npm i dsh-money
+
+# 方式 B：pnpm（DSH profile 依赖用 pnpm 管理，若你装有 pnpm）
+cd ~/.dsh/profiles/web
+pnpm add dsh-money
 ```
 
-在 DSH profile 的 `cordis.patch.yml`（如 `~/.dsh/profiles/web/cordis.patch.yml`）中添加一行：
+两种方式等价，装到 profile 的 `node_modules` 后 DSH 即可解析。若你的 `~/.dsh/profiles/web/node_modules` 目前是空的（依赖实际由 `~/.dsh/profiles/node_modules` 提供），安装前先确认该目录存在（`mkdir -p node_modules` 即可，DSH 重启时会自动维护依赖链接）。
+
+> 如果不知道 profile 目录，在 DSH 终端执行 `echo $DSH_HOME`（默认 `~/.dsh`），profile 即 `$DSH_HOME/profiles/<名字>/`（Web 端通常是 `web`）。
+
+### 第二步：挂载到 profile
+
+编辑 profile 目录下的 `cordis.patch.yml`（如 `~/.dsh/profiles/web/cordis.patch.yml`），在顶层数组中追加：
 
 ```yaml
 - insert:
@@ -93,13 +112,22 @@ npm i dsh-money          # 或 pnpm add dsh-money
       name: 'dsh-money'
 ```
 
-重启 DSH（或触发 profile 重载）后生效。**不再需要动态定义或技能**。
+> 若文件原本是空数组 `[]`，直接替换为上面内容即可。`id` 可随意（唯一即可）；`name` 必须是 `dsh-money`。
 
-**更新到最新版**：
+### 第三步：重启 DSH
 
-```bash
-npm update dsh-money     # 或 pnpm update dsh-money
-```
+重启 DSH（关闭进程后重新启动，或触发 profile 重载）。重启后刷新浏览器页面，插件即生效。
+
+### 验证安装成功
+
+重启后应看到：
+
+- 左侧边栏**最底部（设置按钮下方）**：金色 `余额 ¥ xx.xx` 徽章
+- 侧边栏**每个工作区行**右侧：该工作区总费用（如 `~¥ 8.72`）
+- 对话框**输入框下方**：`本对话 ~¥ xx.xx`
+- 每条 AI 回复的操作按钮行**右侧（分支按钮旁）**：该条回复费用
+
+任一项出现即安装成功。若全无显示，见「故障排查」。
 
 ### 直接 clone 仓库（开发）
 
@@ -110,19 +138,73 @@ npm install
 npm run build            # 生成 lib/（typert 产物 + client bundle）
 ```
 
+## 使用
+
+### 查看费用
+
+| 位置 | 内容 | 刷新 |
+|---|---|---|
+| 侧边栏底部 | 账号余额（实际值，金色徽章） | 60 秒自动 |
+| 侧边栏工作区行 | 工作区全部会话费用总和（估算，`~`） | 会话变化时 |
+| 输入框下方 | 当前对话累计费用（估算，`~`） | 30 秒自动 |
+| 每条回复旁 | 该次回复费用（估算，`~`），紧跟分支按钮右侧 | 新回复时 |
+
+### 查看明细
+
+- **悬停每条回复的费用标签**：显示该次回复的模型名，以及输入（未命中 / 缓存命中 / 缓存写入）、输出 token 用量（带 `token` 单位）与费用（`元/美元，估算`）
+- **悬停侧边栏工作区费用徽章**：显示工作区名、总费用（估算）与会话数
+- **悬停侧边栏余额**：提示「账号剩余金额（自动刷新）」
+
+### 切换显示币种
+
+设置页 → **General** → “费用显示货币”，可选：
+
+- `自动（跟随余额）`：余额为美元则按美元价目显示，否则按人民币（默认）
+- `人民币 ¥` / `美元 $`：强制按对应价目表计算并显示
+
+> ⚠️ 币种设置保存在 DSH host 进程内（进程级记忆），重启 DSH 后恢复为“自动”。
+
+### 费用含义
+
+- 余额来自 DeepSeek `GET /user/balance` 接口，是**实际值**（不加 `~`）
+- 费用基于官方公开价目 × token 用量**估算**（带 `~`），不代表最终账单；计价口径与算法见上文「计价口径」「计算流程」
+
+## 更新
+
+```bash
+cd ~/.dsh/profiles/web
+npm update dsh-money    # 或 pnpm update dsh-money
+```
+
+然后**重启 DSH**（host 进程内的插件代码才会换新）。`cordis.patch.yml` 的挂载行无需改动。
+
+> 发布节奏见 [npm 页面](https://www.npmjs.com/package/dsh-money)；`dsh-money` 包内有完整的 `lib/` 构建产物（host 半段、client bundle、typert 清单），`npm update` 后无需额外构建。
+
+## 卸载
+
+1. 删除 profile 的 `cordis.patch.yml` 中的 `- id: money` 挂载行（或整段 insert）
+2. 重启 DSH
+3. （可选）移除依赖：`cd ~/.dsh/profiles/web && npm remove dsh-money`
+
+## 故障排查
+
+| 现象 | 处理 |
+|---|---|
+| 页面无任何费用显示 | ① 确认在 profile 目录执行了 `npm i dsh-money`；② 确认 `cordis.patch.yml` 挂载行拼写正确（`name: 'dsh-money'`）；③ 确认已重启 DSH 并刷新页面 |
+| 重启后找不到 dsh-money（启动报错） | 包未装入 profile 的 `node_modules`——重新在 profile 目录执行安装命令；不要用仓库内手动 symlink 替代 |
+| 余额显示 `—` | DeepSeek API Key 未配置或不可用，检查「配置」；费用计算不受影响 |
+| 费用全为 0 / 无 `~` 值 | 会话尚无 `assistant/message` 事件（新会话无回复），发一条消息后自动出现 |
+| 币种不对 | 设置页 → General → 费用显示货币；重启后恢复“自动”为正常行为 |
+| 更新后没变化 | 重启 DSH 了吗？host 进程内的代码需要重启才换新 |
+
 ## 配置
 
-插件自动读取已有 DeepSeek 配置：
+插件自动读取已有 DeepSeek 配置，无需单独配置：
 
 - **API Key**：`ctx.credentials` 服务（默认引用 `DEEPSEEK_API_KEY`），也可通过设置 `llm-deepseek.apiKeyEnv` 覆盖
 - **Base URL**：默认 `https://api.deepseek.com`，可通过设置 `llm-deepseek.baseURL` 覆盖（兼容网关/代理）
 
-**显示币种**：设置页 → General → “费用显示货币”，可选：
-
-- `自动（跟随余额）`：余额为 USD 则按美元价目显示，否则按人民币
-- `人民币 ¥` / `美元 $`：强制按对应价目表计算并显示
-
-> 币种设置保存在 DSH host 进程内（静态插件进程级记忆），重启后恢复为“自动”。
+**显示币种**：设置页 → General → “费用显示货币”（见「使用」章节）。
 
 ## 开发
 
