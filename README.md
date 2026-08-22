@@ -86,21 +86,26 @@ usage: input 736 / cacheRead 492,928 / output 816
 
 ### 第一步：安装 npm 包
 
-在 **DSH profile 目录**（默认 `~/.dsh/profiles/web/`）执行：
+**方式 A（推荐）：DSH 官方插件命令**（需先安装 pnpm，见下方提示）
 
 ```bash
-# 方式 A：npm（最通用，npm 随 Node 一起安装）
-cd ~/.dsh/profiles/web
-npm i dsh-money
+dsh plugin --profile web add dsh-money
+```
 
-# 方式 B：pnpm（DSH profile 依赖用 pnpm 管理，若你装有 pnpm）
+> 该命令在 web profile 目录内执行 `pnpm add dsh-money`，自动完成安装并写入 profile 依赖。`--profile` 换成你的 profile 名（Web 端默认 `web`）。
+
+**方式 B：在 profile 目录手动安装**
+
+```bash
 cd ~/.dsh/profiles/web
-pnpm add dsh-money
+npm i dsh-money          # 或 pnpm add dsh-money
 ```
 
 两种方式等价，装到 profile 的 `node_modules` 后 DSH 即可解析。若你的 `~/.dsh/profiles/web/node_modules` 目前是空的（依赖实际由 `~/.dsh/profiles/node_modules` 提供），安装前先确认该目录存在（`mkdir -p node_modules` 即可，DSH 重启时会自动维护依赖链接）。
 
-> 如果不知道 profile 目录，在 DSH 终端执行 `echo $DSH_HOME`（默认 `~/.dsh`），profile 即 `$DSH_HOME/profiles/<名字>/`（Web 端通常是 `web`）。
+> **pnpm 安装**：`dsh plugin` 与 DSH profile 依赖管理使用 pnpm。安装 pnpm：`npm i -g pnpm`（或 `corepack enable pnpm`）。若不想装 pnpm，用「方式 B」的 `npm i` 亦可。
+>
+> 如果不知道 profile 目录，执行 `echo $DSH_HOME`（默认 `~/.dsh`），profile 即 `$DSH_HOME/profiles/<名字>/`（Web 端通常是 `web`）。
 
 ### 第二步：挂载到 profile
 
@@ -172,6 +177,10 @@ npm run build            # 生成 lib/（typert 产物 + client bundle）
 ## 更新
 
 ```bash
+# 官方命令（推荐）
+dsh plugin --profile web update dsh-money
+
+# 或手动
 cd ~/.dsh/profiles/web
 npm update dsh-money    # 或 pnpm update dsh-money
 ```
@@ -184,13 +193,13 @@ npm update dsh-money    # 或 pnpm update dsh-money
 
 1. 删除 profile 的 `cordis.patch.yml` 中的 `- id: money` 挂载行（或整段 insert）
 2. 重启 DSH
-3. （可选）移除依赖：`cd ~/.dsh/profiles/web && npm remove dsh-money`
+3. （可选）移除依赖：`dsh plugin --profile web remove dsh-money`（或 `cd ~/.dsh/profiles/web && npm remove dsh-money`）
 
 ## 故障排查
 
 | 现象 | 处理 |
 |---|---|
-| 页面无任何费用显示 | ① 确认在 profile 目录执行了 `npm i dsh-money`；② 确认 `cordis.patch.yml` 挂载行拼写正确（`name: 'dsh-money'`）；③ 确认已重启 DSH 并刷新页面 |
+| 页面无任何费用显示 | ① 确认已用 `dsh plugin --profile web add dsh-money`（或 profile 目录 `npm i dsh-money`）安装；② 确认 `cordis.patch.yml` 挂载行拼写正确（`name: 'dsh-money'`）；③ 确认已重启 DSH 并刷新页面 |
 | 重启后找不到 dsh-money（启动报错） | 包未装入 profile 的 `node_modules`——重新在 profile 目录执行安装命令；不要用仓库内手动 symlink 替代 |
 | 余额显示 `—` | DeepSeek API Key 未配置或不可用，检查「配置」；费用计算不受影响 |
 | 费用全为 0 / 无 `~` 值 | 会话尚无 `assistant/message` 事件（新会话无回复），发一条消息后自动出现 |
