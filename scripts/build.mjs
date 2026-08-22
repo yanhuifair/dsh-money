@@ -42,7 +42,14 @@ if (!remoteEmitted) console.warn('  ⚠️ 未生成 remote-client 产物');
 
 // 2. tsc 编译 host 半段（types 保留给 generator 已验证的源码）
 console.log('[2/3] tsc 编译 host 半段 → lib/');
+// 清理 tsbuildinfo，避免增量缓存导致 index.js/types.js 未重新 emit
+for (const f of ['tsconfig.tsbuildinfo', 'tsconfig.dsh-money.tsbuildinfo']) {
+  try { rmSync(join(pkg, f)); } catch (e) {}
+}
 execSync('npx tsc -p packages/dsh-money/tsconfig.json', { cwd: root, stdio: 'inherit' });
+for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/types.js', 'lib/types.d.ts']) {
+  if (!existsSync(join(pkg, required))) throw new Error(`tsc 未生成 ${required}，构建失败`);
+}
 
 // 3. client bundle
 console.log('[3/3] 生成 client bundle → lib/client.js');
