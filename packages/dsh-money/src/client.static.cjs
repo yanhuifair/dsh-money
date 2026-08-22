@@ -33,11 +33,13 @@ function apply(ctx) {
     const tag = document.createElement('style');
     tag.dataset.dshMoney = CSS_ID;
     tag.textContent =
-      'div[data-slot="conversation.chat.assistant-actions"]:has(.dsh-cost-reply) ~ :last-child { order: 101; }';
+      ''; // TEMP: :has CSS 临时禁用（性能对照），布局待重新设计
     document.head.appendChild(tag);
   }
 
   const bySession = new Map();
+  // 会话 replies 的 messageId → reply 索引（数据到达时构建一次，组件 O(1) 查找）
+  const replyIndex = new Map();
   const listeners = new Set();
   const inflight = new Map();
 
@@ -66,6 +68,10 @@ function apply(ctx) {
   function getOverview(sessionId) {
     return bySession.get(sessionId);
   }
+  function getReply(sessionId, messageId) {
+    const idx = replyIndex.get(sessionId);
+    return idx ? (idx.get(messageId) || null) : null;
+  }
   function refresh(sessionId) {
     if (!sessionId || inflight.has(sessionId)) return;
     inflight.set(sessionId, true);
@@ -75,6 +81,14 @@ function apply(ctx) {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object' && !value.error) {
           bySession.set(sessionId, value);
+          // 预建 messageId 索引，避免每条回复渲染时线性遍历全部 replies
+          const idx = new Map();
+          if (Array.isArray(value.replies)) {
+            for (const r of value.replies) {
+              if (r && r.messageId != null) idx.set(r.messageId, r);
+            }
+          }
+          replyIndex.set(sessionId, idx);
           notify(sessionId);
         }
       })
@@ -142,12 +156,14 @@ function apply(ctx) {
     const nodes = session && session.nodes ? session.nodes.length : 0;
     const [overview, setOverview] = React.useState(undefined);
     React.useEffect(() => {
+      // 只依赖 sessionId：订阅 + 刷新与对话快照变化解耦，
+      // 避免流式渲染时快照高频变化导致 effect 反复重建（拖慢消息渲染）
       const apply = (sid) => { if (sid === sessionId) setOverview(getOverview(sid)); };
       const unsub = subscribe(apply);
       refresh(sessionId);
       const dispose = ctx.interval(() => refresh(sessionId), 30000);
       return () => { unsub(); dispose(); };
-    }, [sessionId, turns, nodes]);
+    }, [sessionId]);
     const o = overview || {};
     const currency = o.currency || 'CNY';
     return React.createElement('div', {
@@ -165,26 +181,22 @@ function apply(ctx) {
   }
 
   // ---- 每条回复的费用标签（分支按钮右侧）----
+  // 性能：不独立请求/订阅（历史回复可能成百上千条，逐个请求+订阅会拖慢打开对话）。
+  // 改为读取共享快照：由 CostDock 统一 refresh，数据到达后通过 notify 驱动本组件重渲染。
   function ReplyCost(props) {
     const sessionId = props.sessionId;
     const messageId = props.messageId;
-    const [overview, setOverview] = React.useState(undefined);
+    const [tick, setTick] = React.useState(0);
     React.useEffect(() => {
-      const apply = (sid) => { if (sid === sessionId) setOverview(getOverview(sid)); };
+      // 订阅共享数据更新（廉价：一个 setState 计数，不发起请求）
+      const apply = (sid) => { if (sid === sessionId) setTick((t) => t + 1); };
       const unsub = subscribe(apply);
-      refresh(sessionId);
       return () => unsub();
     }, [sessionId]);
-    let reply = null;
-    let currency = 'CNY';
-    if (overview) {
-      if (overview.currency) currency = overview.currency;
-      if (Array.isArray(overview.replies)) {
-        for (const r of overview.replies) {
-          if (r.messageId === messageId) { reply = r; break; }
-        }
-      }
-    }
+    const overview = getOverview(sessionId);
+    if (!overview) return null;
+    const reply = getReply(sessionId, messageId);
+    const currency = typeof overview.currency === 'string' ? overview.currency : 'CNY';
     if (!reply || reply.cost == null) return null;
     return React.createElement('span', {
       className: 'dsh-cost-reply',

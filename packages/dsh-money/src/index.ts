@@ -292,13 +292,21 @@ export default class MoneyCostService extends TypertRemoteService {
     return { balance };
   }
 
-  /** 单会话费用总览 */
+  /** 单会话费用总览（余额与费用解耦：余额网络请求不阻塞费用计算） */
   @Remote("overview")
   async overview(args: { sessionId?: string }): Promise<MoneyCostOverview | { error: string }> {
     const sessionId = args && typeof args === 'object' && typeof args.sessionId === 'string' ? args.sessionId : null;
     if (!sessionId) return { error: 'missing sessionId' };
-    const balance = await this.cachedBalance();
-    const currency = this.resolveCurrency(balance);
+    // 余额：只读缓存（未过期立即返回；否则后台刷新，不等待）
+    const balance = this.balanceCache.value && Date.now() - this.balanceCache.at < 60000
+      ? this.balanceCache.value
+      : null;
+    if (!this.balanceCache.value || Date.now() - this.balanceCache.at >= 60000) {
+      // 后台刷新余额（不阻塞费用响应）
+      this.cachedBalance().catch(() => {});
+    }
+    // 币种：用当前余额缓存解析；无缓存时默认跟随（非美元 → 人民币）
+    const currency = this.resolveCurrency(this.balanceCache.value || null);
     const fold = await this.foldSession(sessionId, currency);
     const last = fold.replies.length ? fold.replies[fold.replies.length - 1] : null;
     return {
