@@ -31,7 +31,11 @@ export async function apply(ctx) {
   // 2. 挂载完成后动态注入 remote.moneyCost：其回调 scope 的 fiber store 已绑定
   //    该服务，scope.remote.moneyCost 可安全访问（UI 实现内部使用它）
   ctx.inject(['remote.moneyCost'], (scope) => {
-    clientStatic.apply(scope);
+    try {
+      clientStatic.apply(scope);
+    } catch (e) {
+      console.error('[dsh-money] client UI error:', e);
+    }
   });
   // 3. 返回 disposer：卸载时摘除远端命名空间（UI 子 fiber 随父级自动卸载）
   return async () => {

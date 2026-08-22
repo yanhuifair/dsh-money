@@ -24,7 +24,8 @@ const React = require('react');
 const inject = ['slots', 'remote', 'timer'];
 
 function apply(ctx) {
-  const remote = ctx.remote.moneyCost;
+  const remote = (ctx && ctx.remote) ? ctx.remote.moneyCost : null;
+  if (!remote) return;
 
   // 手动注入布局 CSS（静态插件无 styles 全局）
   const CSS_ID = 'dsh-money-layout-css';
@@ -202,7 +203,7 @@ function apply(ctx) {
   let balanceLoaded = false;
 
   function loadWsTable() {
-    remote.workspacesAll({})
+    remote.workspacesAll()
       .then((res) => {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object' && !value.error) {
@@ -214,7 +215,7 @@ function apply(ctx) {
   }
 
   function loadBalance() {
-    remote.balance({})
+    remote.balance()
       .then((res) => {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object') {
@@ -389,18 +390,21 @@ function apply(ctx) {
     );
   }
 
-  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register(
-    { name: 'conversation.composer.dock', id: 'cost-meter', order: 5 },
-    (props) => React.createElement(CostDock, props),
-  ));
-  ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register(
-    { name: 'conversation.chat.assistant-actions', id: 'reply-cost', order: 20 },
-    (props) => React.createElement(ReplyCost, props),
-  ));
-  ctx.slots.inject('settings.general.item', () => ctx.slots.register(
-    { name: 'settings.general.item', id: 'cost-currency', order: 30 },
-    () => React.createElement(CurrencySettingRow),
-  ));
+  // 注册 UI（防重复：client 插件可能被多次 apply，重复注册会抛 id 冲突）
+  const registeredSlots = new Set();
+  function injectSlot(name, id, order, factory) {
+    const key = name + '::' + id;
+    if (registeredSlots.has(key)) return;
+    registeredSlots.add(key);
+    ctx.slots.inject(name, () => ctx.slots.register(
+      { name, id, order },
+      factory,
+    ));
+  }
+
+  injectSlot('conversation.composer.dock', 'cost-meter', 5, (props) => React.createElement(CostDock, props));
+  injectSlot('conversation.chat.assistant-actions', 'reply-cost', 20, (props) => React.createElement(ReplyCost, props));
+  injectSlot('settings.general.item', 'cost-currency', 30, () => React.createElement(CurrencySettingRow));
 
   startSidebarObserver();
 }
