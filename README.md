@@ -205,6 +205,7 @@ npm update dsh-money    # 或 pnpm update dsh-money
 | 费用全为 0 / 无 `~` 值 | 会话尚无 `assistant/message` 事件（新会话无回复），发一条消息后自动出现 |
 | 币种不对 | 设置页 → General → 费用显示货币；重启后恢复“自动”为正常行为 |
 | 更新后没变化 | 重启 DSH 了吗？host 进程内的代码需要重启才换新 |
+| 启动报错 `result codec is not backed by a zod v4 schema` | 本地开发时 zod 版本必须为 **v4**（typert 生成器/loader 依赖 zod v4 的 `_zod` 标记）。确认根目录与 `packages/dsh-money/package.json` 均为 `"zod": "^4.x"`，然后 `npm install && npm run build` 后重启 DSH |
 
 ## 配置
 
@@ -220,8 +221,8 @@ npm update dsh-money    # 或 pnpm update dsh-money
 ```bash
 git clone https://github.com/yanhuifair/dsh-money.git
 cd dsh-money
-npm install
-npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + client bundle）
+npm install            # 依赖要求 zod v4（typert 生成器/loader 校验 `_zod` 标记）
+npm run build          # 生成 packages/dsh-money/lib/（typert 产物 + client bundle）
 ```
 
 插件源码结构（monorepo）：
