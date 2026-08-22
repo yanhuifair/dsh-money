@@ -122,7 +122,7 @@ npm run build            # 生成 lib/（typert 产物 + client bundle）
 - `自动（跟随余额）`：余额为 USD 则按美元价目显示，否则按人民币
 - `人民币 ¥` / `美元 $`：强制按对应价目表计算并显示
 
-> 币种设置保存在插件进程内（动态插件特性），重启后恢复为“自动”。
+> 币种设置保存在 DSH host 进程内（静态插件进程级记忆），重启后恢复为“自动”。
 
 ## 开发
 
@@ -130,6 +130,7 @@ npm run build            # 生成 lib/（typert 产物 + client bundle）
 git clone https://github.com/yanhuifair/dsh-money.git
 cd dsh-money
 npm install
+npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + client bundle）
 ```
 
 插件源码结构（monorepo）：

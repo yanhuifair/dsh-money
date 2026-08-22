@@ -1,11 +1,13 @@
 name: Publish to npm
 
 # 触发方式：
-#   1. 推送形如 v1.0.0 的 tag（推荐，版本号 = tag 去掉 v 前缀，需与 package.json 一致）
+#   1. 推送形如 v1.1.0 的 tag（推荐，版本号 = tag 去掉 v 前缀，需与 packages/dsh-money/package.json 一致）
 #   2. 手动触发：Actions 页面 → Publish to npm → Run workflow
 #
 # 前置条件：仓库 Settings → Secrets and variables → Actions 中添加 NPM_TOKEN
 # （npmjs.com → Access Tokens → Generate New Token，选择 Publish/Automation 权限）
+#
+# monorepo：发布包位于 packages/dsh-money/，构建产物 lib/ 由 build 脚本生成。
 
 on:
   push:
@@ -29,23 +31,32 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: 安装依赖
+        run: npm ci
+
       - name: 校验版本号与 tag 一致（仅 tag 触发时）
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
+          PKG_VERSION=$(node -p "require('./packages/dsh-money/package.json').version")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ package.json 版本 ($PKG_VERSION) 与 tag 版本 ($TAG_VERSION) 不一致"
+            echo "❌ packages/dsh-money/package.json 版本 ($PKG_VERSION) 与 tag 版本 ($TAG_VERSION) 不一致"
             exit 1
           fi
           echo "✅ 版本一致: v$PKG_VERSION"
 
+      - name: 构建（生成 lib/ 产物）
+        run: npm run build
+
       - name: 检查发布内容
         run: |
+          cd packages/dsh-money
           echo "== 将发布的文件 =="
           npm pack --dry-run
 
       - name: 发布到 npm
-        run: npm publish --provenance --access public
+        run: |
+          cd packages/dsh-money
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
