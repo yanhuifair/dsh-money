@@ -97,6 +97,10 @@ dsh plugin --profile web add dsh-money
 ```
 
 > 该命令在 web profile 目录内执行 `pnpm add dsh-money`，自动完成安装并写入 profile 依赖。`--profile` 换成你的 profile 名（Web 端默认 `web`）。
+>
+> ⚠️ **macOS（Homebrew）用户注意**：`/opt/homebrew/bin/dsh` 是另一个同名程序（GNU Distributed Shell，2005 年产物），与 DeepSeek Harness 的 `dsh` 冲突。若执行 `dsh plugin --profile ...` 报 `unrecognized option '--profile'`，说明 PATH 中 Homebrew 的 dsh 抢占了命令。两种解决：
+> 1. 用 DSH 的完整路径：`$(npm root -g 2>/dev/null)/@deepseek-ai/dsh` 或 npx 缓存中的路径执行（本机为 `/Users/Fair/.npm/_npx/.../node_modules/.bin/dsh`）
+> 2. 确认哪个是你的 DSH 启动命令（你平时启动 DSH 用的那个 `dsh` 才是正确的）——直接用它执行 `plugin` 子命令
 
 **方式 B：在 profile 目录手动安装**
 
@@ -206,6 +210,7 @@ npm update dsh-money    # 或 pnpm update dsh-money
 | 现象 | 处理 |
 |---|---|
 | 页面无任何费用显示 | ① 确认已用 `dsh plugin --profile web add dsh-money`（或 profile 目录 `npm i dsh-money`）安装；② 确认 `cordis.patch.yml` 挂载行拼写正确（`name: 'dsh-money'`）；③ 确认已重启 DSH 并刷新页面 |
+| 执行 `dsh plugin --profile ...` 报 `unrecognized option '--profile'` | macOS 上 Homebrew 的 `dsh`（GNU Distributed Shell）与 DSH 的 `dsh` 同名冲突。用你启动 DSH 的那个 `dsh`（或 npx 缓存路径）执行，见「安装 → 方式 A」提示 |
 | 重启后找不到 dsh-money（启动报错） | 包未装入 profile 的 `node_modules`——重新在 profile 目录执行安装命令；不要用仓库内手动 symlink 替代 |
 | 余额显示 `—` | DeepSeek API Key 未配置或不可用，检查「配置」；费用计算不受影响 |
 | 费用全为 0 / 无 `~` 值 | 会话尚无 `assistant/message` 事件（新会话无回复），发一条消息后自动出现 |
