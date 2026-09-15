@@ -12,6 +12,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
+import z from '@deepseek-ai/schemastery';
 import type {
   MoneyBalanceInfo,
   MoneyBalanceResult,
@@ -37,6 +38,38 @@ const PRICES: Record<string, Record<string, { hit: number; miss: number; out: nu
     'deepseek-v4-pro': { hit: 0.022, miss: 0.66, out: 1.98 },
   },
 };
+
+/**
+ * 显示设置：注册到 DSH settings 服务，写入用户层文档（$DSH_HOME/settings.yaml），
+ * 因此重启后仍然生效；没有 settings 服务时退回组合入口（cordis.patch.yml）的 config。
+ */
+const SETTINGS_NS = 'dsh-money';
+
+const SETTINGS_SCHEMA = z.object({
+  currency: z.union(['auto', 'CNY', 'USD']).default('auto'),
+  showBalance: z.boolean().default(true),
+});
+
+interface MoneySettings {
+  currency: 'auto' | 'CNY' | 'USD';
+  showBalance: boolean;
+}
+
+/** settings 服务所需的最小契约（只用到 update） */
+interface SettingsWriter {
+  update(ns: string, patch: object): Promise<void>;
+}
+
+/** installSection 所需的最小契约 */
+interface SettingsSections {
+  installSection(
+    owner: Context,
+    ns: string,
+    schema: unknown,
+    entry: MoneySettings,
+    hooks: { setSource(current: () => MoneySettings): void; onChange(): void },
+  ): void;
+}
 
 function isPeakUtc(ms: number): boolean {
   const h = new Date(ms).getUTCHours();
@@ -73,12 +106,54 @@ function costOf(
  * 远端命名空间 = moneyCost（client 经 ctx.remote.moneyCost.* 调用）。
  */
 export default class MoneyCostService extends TypertRemoteService {
-  /** 显示货币设置（进程内记忆）：'auto' | 'CNY' | 'USD' */
-  private currencySetting: 'auto' | 'CNY' | 'USD' = 'auto';
+  /** 组合入口（cordis.patch.yml 的 config）作为 settings 的 base 与回退值 */
+  static Config = SETTINGS_SCHEMA;
+
+  /** 组合入口配置：无 settings 服务时的权威值 */
+  private entry: MoneySettings = { currency: 'auto', showBalance: true };
+  /** 已挂载 settings 时的实时读取器（persist 层优先，其次 entry） */
+  private live: (() => MoneySettings) | null = null;
+  /** 落盘失败时的进程内覆盖（优先级最高，直到下一次成功写入或外部变更） */
+  private override: Partial<MoneySettings> = {};
   private balanceCache: { at: number; value: MoneyBalanceInfo | null } = { at: 0, value: null };
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config?: Partial<MoneySettings>) {
     super(ctx, 'moneyCost');
+    this.entry = {
+      currency: config && (config.currency === 'CNY' || config.currency === 'USD' || config.currency === 'auto')
+        ? config.currency
+        : 'auto',
+      showBalance: !(config && config.showBalance === false),
+    };
+    // settings 服务可能后于本插件挂载，故用动态 inject 等待
+    ctx.inject(['settings'], (settingsCtx: Context) => {
+      const provider = settingsCtx.get('settings') as (SettingsSections | undefined);
+      if (!provider || typeof provider.installSection !== 'function') return;
+      try {
+        provider.installSection(ctx, SETTINGS_NS, SETTINGS_SCHEMA, this.entry, {
+          setSource: (current: () => MoneySettings) => { this.live = current; },
+          onChange: () => {
+            // 外部（持久层）已提交新值：撤掉进程内覆盖，并清缓存按新口径重算
+            this.override = {};
+            this.balanceCache = { at: 0, value: null };
+            if (this.foldCache) this.foldCache.clear();
+          },
+        });
+      } catch (e) {
+        // 注册失败（如命名空间冲突）时退回组合入口配置，不影响计价
+        this.live = null;
+      }
+    });
+  }
+
+  /** 当前生效设置：外部持久层 → 进程内覆盖（仅在落盘失败时存在） */
+  private settings(): MoneySettings {
+    const base = this.live ? this.live() : this.entry;
+    const merged = { ...base, ...this.override };
+    return {
+      currency: merged.currency === 'CNY' || merged.currency === 'USD' ? merged.currency : 'auto',
+      showBalance: merged.showBalance !== false,
+    };
   }
 
   private normalizeBalanceInfo(info: Record<string, unknown> | null | undefined): MoneyBalanceInfo | null {
@@ -117,28 +192,32 @@ export default class MoneyCostService extends TypertRemoteService {
       // 忽略凭据解析失败
     }
     if (!key) return null;
-    const shell = this.ctx.get('shell') as { resolve(spec: object): { run(spec: object): Promise<{ exitCode?: number; stdout?: { text: string } }> }; run(spec: object): Promise<{ exitCode?: number; stdout?: { text: string } }> } | undefined;
-    if (!shell) return null;
-    let result: { exitCode?: number; stdout?: { text: string } };
+    // 用宿主进程的 fetch，而不是 shell + curl：
+    //  1) 与 @deepseek-ai/dsh-llm-deepseek 走同一条路径（globalThis.fetch + 全局
+    //     undici dispatcher），因此遵守 DSH 的代理配置；
+    //  2) shell 出网会被沙箱按部署默认策略（workspace-write）执行，Windows 受限
+    //     令牌下 curl 的 Schannel 会 AcquireCredentialsHandle 失败
+    //     （SEC_E_NO_CREDENTIALS），余额永远取不到；
+    //  3) 免去 Windows 上 `curl` 被 PowerShell 别名成 Invoke-WebRequest 的坑。
+    let resp: Response;
     try {
-      const spec = shell.resolve({
-        command: `curl -sS -m 10 -H "Authorization: Bearer ${key}" "${baseURL}/user/balance"`,
-        timeoutMs: 15000,
-        stdoutMaxBytes: 1048576,
+      resp = await fetch(`${baseURL.replace(/\/+$/, '')}/user/balance`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(15000),
       });
-      result = await shell.run(spec);
     } catch (e) {
       return null;
     }
-    if (!result || result.exitCode !== 0) return null;
+    if (!resp.ok) return null;
     let body: { balance_infos?: Array<Record<string, unknown>> };
     try {
-      body = JSON.parse(result.stdout?.text || '{}');
+      body = await resp.json() as { balance_infos?: Array<Record<string, unknown>> };
     } catch (e) {
       return null;
     }
     if (!body || !Array.isArray(body.balance_infos) || !body.balance_infos.length) return null;
-    const wanted = this.currencySetting === 'CNY' || this.currencySetting === 'USD' ? this.currencySetting : null;
+    const currency = this.settings().currency;
+    const wanted = currency === 'CNY' || currency === 'USD' ? currency : null;
     const matched = wanted
       ? body.balance_infos.find((i) => i && i.currency === wanted)
       : undefined;
@@ -160,7 +239,8 @@ export default class MoneyCostService extends TypertRemoteService {
 
   /** 解析实际显示币种：手动设置优先，自动则跟随余额币种（非美元一律人民币） */
   private resolveCurrency(balance: MoneyBalanceInfo | null): 'CNY' | 'USD' {
-    if (this.currencySetting === 'CNY' || this.currencySetting === 'USD') return this.currencySetting;
+    const currency = this.settings().currency;
+    if (currency === 'CNY' || currency === 'USD') return currency;
     return balance && balance.currency === 'USD' ? 'USD' : 'CNY';
   }
 
@@ -292,16 +372,40 @@ export default class MoneyCostService extends TypertRemoteService {
     return workspaces;
   }
 
-  /** 读取/设置显示币种 */
+  /**
+   * 读取/设置显示设置。
+   * 传参即写入（持久化到 DSH settings 用户层）；不传参只读取。
+   */
   @Remote("config")
-  async config(args: { currency?: string }): Promise<MoneyConfigResult> {
-    const value = args && typeof args === 'object' ? args.currency : undefined;
-    if (value === 'CNY' || value === 'USD' || value === 'auto') {
-      this.currencySetting = value;
+  async config(args: { currency?: string; showBalance?: boolean }): Promise<MoneyConfigResult> {
+    const a = args && typeof args === 'object' ? args : {};
+    const patch: { currency?: 'auto' | 'CNY' | 'USD'; showBalance?: boolean } = {};
+    if (a.currency === 'CNY' || a.currency === 'USD' || a.currency === 'auto') patch.currency = a.currency;
+    if (typeof a.showBalance === 'boolean') patch.showBalance = a.showBalance;
+    if (patch.currency !== undefined || patch.showBalance !== undefined) {
+      const provider = this.ctx.get('settings') as (SettingsWriter | undefined);
+      let persisted = false;
+      if (provider && typeof provider.update === 'function') {
+        try {
+          await provider.update(SETTINGS_NS, patch);
+          persisted = true;
+        } catch (e) {
+          // 落盘失败（如只读文档）
+          persisted = false;
+        }
+      }
+      if (persisted) {
+        this.override = {};
+      } else {
+        // 保证开关当下生效；重启后回到持久值
+        this.override = { ...this.override, ...patch };
+        if (!provider) this.entry = { ...this.entry, ...patch };
+      }
       this.balanceCache = { at: 0, value: null };
-      this.foldCache.clear();
+      if (this.foldCache) this.foldCache.clear();
     }
-    return { currency: this.currencySetting };
+    const current = this.settings();
+    return { currency: current.currency, showBalance: current.showBalance };
   }
 
   /** 侧边栏底部余额 */

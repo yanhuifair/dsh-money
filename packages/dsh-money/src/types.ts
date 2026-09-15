@@ -53,9 +53,11 @@ export interface MoneyWorkspacesAll {
   workspaces: MoneyWorkspaceCost[];
 }
 
-/** 显示币种设置 */
+/** 显示设置（显示币种 + 是否显示余额行） */
 export interface MoneyConfigResult {
   currency: 'auto' | 'CNY' | 'USD';
+  /** 是否显示侧边栏余额行 */
+  showBalance: boolean;
 }
 
 /** 余额查询结果 */

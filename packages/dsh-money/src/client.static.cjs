@@ -4,7 +4,8 @@
  * UI：
  *  - conversation.composer.dock：输入区下方统计行（仅本对话费用，金色徽章）
  *  - conversation.chat.assistant-actions：每条回复费用标签（分支按钮右侧，悬停明细）
- *  - settings.general.item：费用显示货币设置行
+ *  - settings.general.item：设置行（费用显示货币 / 显示账号余额），经 remote.config 读写，
+ *    由 Host 持久化到 DSH settings 文档，重启后仍生效
  *  - 侧边栏 DOM 注入：工作区行（div[role=treeitem][aria-expanded]）总费用徽章
  *  - 侧边栏底部余额：DOM 注入行，插在设置按钮之后（最底部，左对齐，背景包裹文字）
  *
@@ -57,6 +58,35 @@ function apply(ctx) {
   function subscribeCurrency(fn) {
     currencyListeners.add(fn);
     return () => currencyListeners.delete(fn);
+  }
+
+  let showBalanceSetting = true;
+  const showBalanceListeners = new Set();
+  function setShowBalance(value) {
+    showBalanceSetting = value !== false;
+    for (const fn of Array.from(showBalanceListeners)) {
+      try { fn(showBalanceSetting); } catch (e) {}
+    }
+  }
+  function subscribeShowBalance(fn) {
+    showBalanceListeners.add(fn);
+    return () => showBalanceListeners.delete(fn);
+  }
+
+  /**
+   * 启动时读一次持久化设置（显示币种 + 余额开关）。
+   * 否则要等用户打开设置面板、设置行挂载后才会读到，重启后设置看似失效。
+   */
+  function loadConfig() {
+    return remote.config({})
+      .then((res) => {
+        const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
+        if (value && typeof value === 'object') {
+          if (typeof value.currency === 'string') setCurrency(value.currency);
+          if (typeof value.showBalance === 'boolean') setShowBalance(value.showBalance);
+        }
+      })
+      .catch(() => {});
   }
 
   function notify(sessionId) {
@@ -245,6 +275,11 @@ function apply(ctx) {
   // 余额行：插到 settingsArea（设置）之后，即侧边栏最底部；左对齐，背景包裹文字
   function renderBalanceRow() {
     if (!balanceLoaded) return;
+    if (!showBalanceSetting) {
+      const hidden = document.querySelector('.dsh-money-balance-row');
+      if (hidden) hidden.remove();
+      return;
+    }
     const brandName = document.querySelector('[data-slot="sidebar.brand.name"]');
     const settingsSlot = document.querySelector('[data-slot="sidebar.settings"]');
     let row = document.querySelector('.dsh-money-balance-row');
@@ -253,14 +288,19 @@ function apply(ctx) {
       return;
     }
     const settingsArea = settingsSlot.parentElement;
-    const footArea = settingsArea.parentElement;
+    // 设置按钮所在的那一行：div.settingsLine = display:flex; align-items:center; gap:8px，
+    // 其中 settingsArea{flex:1}、settingsActions{flex:none}。把徽章插在 settingsArea
+    // 之后，它就落在这一行的右端、紧挨设置按钮。
+    const settingsLine = settingsArea.parentElement;
     const text = '余额 ' + fmtBalance(balance);
     const tip = '账号剩余金额（自动刷新）';
     if (!row) {
       row = document.createElement('div');
       row.className = 'dsh-money-balance-row';
-      row.style.cssText = 'color:#f0c11d;font-size:11px;padding:2px 12px;border-radius:8px;background:rgba(128,128,128,0.12);margin:2px 0 0;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;text-align:left;align-self:flex-start;max-width:100%;';
-      footArea.insertBefore(row, settingsArea.nextSibling);
+      // align-self:center 与同行其它项垂直居中对齐；原先写 flex-start 会顶到行首，
+      // 看起来像“设置按钮右上方另起一行”。
+      row.style.cssText = 'color:#f0c11d;font-size:11px;padding:2px 10px;border-radius:8px;background:rgba(128,128,128,0.12);margin:0;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;text-align:left;align-self:center;max-width:100%;';
+      settingsLine.insertBefore(row, settingsArea.nextSibling);
     }
     if (row.textContent !== text) row.textContent = text;
     if (row.title !== tip) row.title = tip;
@@ -316,7 +356,8 @@ function apply(ctx) {
     if (injected) return;
     injected = true;
     loadWsTable();
-    loadBalance();
+    // 先取回持久化设置（含余额开关），再决定是否加载余额
+    loadConfig().then(() => { if (showBalanceSetting) loadBalance(); });
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
       // 节流：侧边栏高频 DOM 变化（滚动/展开）合并为一次 applyBadges，避免频繁全量扫描
       let badgeTimer = null;
@@ -333,7 +374,7 @@ function apply(ctx) {
       observer.observe(root, { childList: true, subtree: true });
       ctx.effect(() => () => { if (badgeTimer) { clearTimeout(badgeTimer); badgeTimer = null; } });
     }
-    const disposeRefresh = ctx.interval(() => loadBalance(), 60000);
+    const disposeRefresh = ctx.interval(() => { if (showBalanceSetting) loadBalance(); }, 60000);
     ctx.effect(() => disposeRefresh);
   }
 
@@ -415,6 +456,54 @@ function apply(ctx) {
     );
   }
 
+  /** 设置面板：是否显示侧边栏余额行（持久化，重启后生效） */
+  function ShowBalanceSettingRow() {
+    const [value, setValue] = React.useState(showBalanceSetting);
+    React.useEffect(() => {
+      const unsub = subscribeShowBalance((v) => setValue(v));
+      remote.config({})
+        .then((res) => {
+          const r = res && res.ok === true ? res.value : (res && res.error ? null : res);
+          if (r && typeof r.showBalance === 'boolean') setValue(r.showBalance);
+        })
+        .catch(() => {});
+      return unsub;
+    }, []);
+    const onChange = (e) => {
+      const next = !!(e && e.target && e.target.checked);
+      setValue(next);
+      remote.config({ showBalance: next })
+        .then(() => {
+          setShowBalance(next);
+          if (next) loadBalance();
+          applyBadges();
+        })
+        .catch(() => {});
+    };
+    return React.createElement('div', {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '16px 0',
+        borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))',
+      },
+    },
+      React.createElement('div', { style: { flexDirection: 'column', flex: '1', gap: '4px', minWidth: '0', paddingRight: '48px', display: 'flex' } },
+        React.createElement('div', { style: { color: 'var(--dsw-alias-label-primary, inherit)', fontSize: '14px', fontWeight: '400', lineHeight: '22px' } }, '显示账号余额'),
+        React.createElement('div', { style: { color: 'var(--dsw-alias-label-tertiary, rgba(128,128,128,0.7))', fontSize: '12px', lineHeight: '18px' } },
+          value ? '侧边栏底部显示账号余额（来自 API 的实际值）' : '已隐藏侧边栏余额行，费用显示不受影响'),
+      ),
+      React.createElement('input', {
+        type: 'checkbox',
+        checked: value,
+        onChange,
+        'aria-label': '显示账号余额',
+        style: { width: '18px', height: '18px', cursor: 'pointer', flex: 'none', accentColor: GOLD },
+      }),
+    );
+  }
+
   // 注册 UI（防重复：client 插件可能被多次 apply，重复注册会抛 id 冲突）
   const registeredSlots = new Set();
   function injectSlot(name, id, order, factory) {
@@ -430,6 +519,7 @@ function apply(ctx) {
   injectSlot('conversation.composer.dock', 'cost-meter', 5, (props) => React.createElement(CostDock, props));
   injectSlot('conversation.chat.assistant-actions', 'reply-cost', 20, (props) => React.createElement(ReplyCost, props));
   injectSlot('settings.general.item', 'cost-currency', 30, () => React.createElement(CurrencySettingRow));
+  injectSlot('settings.general.item', 'cost-show-balance', 31, () => React.createElement(ShowBalanceSettingRow));
 
   startSidebarObserver();
 }
