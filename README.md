@@ -42,18 +42,20 @@
 
 ### 计价口径
 
-基于 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（**更新日期：2026-08**，峰值价 = 空闲价 × 2）：
+基于 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（**更新日期：2026-09**，峰值价 = 空闲价 × 2）：
 
 | 模型 | 币种 | 缓存命中（空闲） | 未命中（空闲） | 输出（空闲） |
 |---|---|---|---|---|
-| deepseek-v4-flash | ¥ / $ | 0.05 / 0.007 | 1.5 / 0.22 | 4.5 / 0.66 |
+| deepseek-flash | ¥ / $ | 0.02 / 0.003 | 1 / 0.15 | 4 / 0.6 |
 | deepseek-v4-pro | ¥ / $ | 0.15 / 0.022 | 4.5 / 0.66 | 13.5 / 1.98 |
+
+> **模型名**：官方价格页现用 `deepseek-flash`。旧名 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 仍可调用，但对应模型已下线、请求由 DeepSeek-V4.1-Flash 提供服务并按 Flash 价格计费，故插件经 `MODEL_ALIASES` 把它们统一归一到 `deepseek-flash` 价目。
 
 > **价格来源**：[DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（中文）/ [Pricing 英文页](https://api-docs.deepseek.com/quick_start/pricing)。
 >
-> **更新日期**：2026-08（价格表在 `packages/dsh-money/src/index.ts` 的 `PRICES` 常量中，官方调价时需同步更新并升级版本）。
+> **更新日期**：2026-09（价格表在 `packages/dsh-money/src/index.ts` 的 `PRICES` 常量中，官方调价时需同步更新并升级版本）。
 >
-> 单位：每百万 token。高峰时段 = 北京时间 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00），价格翻倍。
+> 单位：每百万 token。高峰时段 = 北京时间**周一至周五** 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00），价格翻倍；**周末全天为空闲时段**。
 >
 > 账单口径：未命中输入（含 cache write）× miss 价 + 缓存命中 × hit 价 + 输出 × out 价。
 >
@@ -66,22 +68,22 @@
 1. **读取会话日志**：通过 `sessionQuery.readSession(sessionId)` 读取会话事件，只取 `assistant/message` 事件（每个事件 = 一次模型回复，含该次调用的 token 用量；工具调用、重试不会重复计数）
 2. **提取 token 用量**：每个事件的 `usage` 为互斥计数——`inputTokens`（未命中输入）、`cacheReadTokens`（缓存命中）、`outputTokens`（输出，含思考）
 3. **逐条计价**：`本次费用 = 未命中输入 × miss价 + 缓存命中 × hit价 + 输出 × out价`（每百万 token，÷ 1,000,000）
-4. **峰谷判定**：按该回复的时间戳判断——高峰时段（北京 9:00-12:00、14:00-18:00）三档价格全部 × 2
+4. **峰谷判定**：按该回复的时间戳判断——高峰时段（北京**周一至周五** 9:00-12:00、14:00-18:00）三档价格全部 × 2，周末与其余时段按空闲价
 5. **求和**：会话内所有回复费用相加 = 本对话费用；同一工作区内所有会话费用相加 = 工作区总费用；单条即每次回复费用
 
-**计算示例**（deepseek-v4-flash 空闲时段，CNY）：
+**计算示例**（deepseek-flash 空闲时段，CNY）：
 
 ```
 usage: input 736 / cacheRead 492,928 / output 816
-费用 = 736×¥1.5/M + 492,928×¥0.05/M + 816×¥4.5/M
-     = ¥0.0294224（≈ ~¥ 0.0294）
+费用 = 736×¥1/M + 492,928×¥0.02/M + 816×¥4/M
+     = ¥0.0138586（≈ ~¥ 0.0139）
 ```
 
 **余额**：来自 `GET /user/balance` 接口，是**实际值**（不加 `~`）；费用为估算值（带 `~`）。
 
 ## 安装
 
-> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.6**。
+> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.10**。
 
 ### 前置条件
 
