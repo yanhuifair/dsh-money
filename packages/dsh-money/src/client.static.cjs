@@ -37,8 +37,10 @@ function apply(ctx) {
   // 余额（侧边栏底部件共享状态：只请求一次，订阅者重渲染）
   const balanceListeners = new Set();
   let balance = null;
+  let balancePeriod = null;
   let balanceLoaded = false;
   let balanceInflight = false;
+  let periodTimer = null;
 
   let currencySetting = 'auto';
   const currencyListeners = new Set();
@@ -105,6 +107,35 @@ function apply(ctx) {
     cursor: 'default',
   };
 
+  // 时段徽章：高峰用暖色、闲时用绿色，与金色的金额徽章区分
+  function periodBadgeStyle(peak) {
+    return {
+      ...badgeStyle,
+      color: peak ? '#ff8f1f' : '#3fb950',
+      background: peak ? 'rgba(255,143,31,0.12)' : 'rgba(63,185,80,0.12)',
+    };
+  }
+
+  function periodLabel(period) {
+    return period && period.peak ? '高峰' : '闲时';
+  }
+
+  function fmtClock(ms) {
+    if (!Number.isFinite(ms)) return '—';
+    const d = new Date(ms);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return hh + ':' + mm;
+  }
+
+  function periodTooltip(period) {
+    if (!period) return '计费时段未知';
+    const next = fmtClock(period.nextChangeAt);
+    return period.peak
+      ? '当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）\n三档单价 ×2\n下次切换：' + next + ' 起为闲时'
+      : '当前为闲时（含周末与中国法定节假日）\n三档单价为基准价\n下次切换：' + next + ' 起为高峰';
+  }
+
   function moneySymbol(currency) {
     if (currency === 'CNY') return '¥ ';
     if (currency === 'USD') return '$';
@@ -136,6 +167,7 @@ function apply(ctx) {
     const sym = moneySymbol(currency);
     const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，估算）' : '（美元，估算）')];
     if (r.model) lines.push('模型: ' + r.model);
+    lines.push('计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时'));
     if (r.tokens) {
       lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
       lines.push('输入(缓存命中): ' + fmtTokens(r.tokens.cacheRead));
@@ -160,6 +192,21 @@ function apply(ctx) {
     }, [sessionId]);
     const o = overview || {};
     const currency = o.currency || 'CNY';
+    const parts = [];
+    if (o.peakCost != null && o.peakCost > 0) {
+      parts.push(React.createElement('span', {
+        key: 'peak',
+        title: '高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）的累计费用（估算）',
+        style: periodBadgeStyle(true),
+      }, '高峰 ' + fmtMoney(o.peakCost, currency)));
+    }
+    if (o.offPeakCost != null && o.offPeakCost > 0) {
+      parts.push(React.createElement('span', {
+        key: 'offpeak',
+        title: '闲时（含周末与法定节假日）的累计费用（估算）',
+        style: periodBadgeStyle(false),
+      }, '闲时 ' + fmtMoney(o.offPeakCost, currency)));
+    }
     return React.createElement('div', {
       style: { display: 'flex', gap: '10px', alignItems: 'center', fontSize: '11px', opacity: 0.85, padding: '2px 0', whiteSpace: 'nowrap' },
     },
@@ -171,6 +218,7 @@ function apply(ctx) {
         '本对话 ',
         React.createElement('span', { style: badgeStyle }, fmtMoney(o.conversationCost, currency)),
       ),
+      parts,
     );
   }
 
@@ -208,14 +256,25 @@ function apply(ctx) {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object') {
           balance = value.balance || null;
+          if (value.period && typeof value.period.peak === 'boolean') balancePeriod = value.period;
           balanceLoaded = true;
           for (const fn of Array.from(balanceListeners)) {
             try { fn(balance); } catch (e) {}
           }
+          schedulePeriodRefresh();
         }
       })
       .catch(() => {})
       .finally(() => { balanceInflight = false; });
+  }
+
+  // 在时段切换点后刷新一次，避免 60s 轮询跨过边界时状态滞后
+  function schedulePeriodRefresh() {
+    if (periodTimer) { clearTimeout(periodTimer); periodTimer = null; }
+    if (!balancePeriod || typeof balancePeriod.nextChangeAt !== 'number') return;
+    const delay = balancePeriod.nextChangeAt - Date.now() + 500;
+    if (!Number.isFinite(delay) || delay < 1000 || delay > 12 * 3600 * 1000) return;
+    periodTimer = setTimeout(() => { periodTimer = null; loadBalance(); }, delay);
   }
 
   function BalanceAction(props) {
@@ -235,7 +294,17 @@ function apply(ctx) {
       const sym = balance && balance.currency === 'USD' ? '$' : '¥';
       return React.createElement('span', { title: tip, style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
     }
-    return React.createElement('span', { title: tip, style: badgeStyle }, amount);
+    const money = React.createElement('span', { key: 'money', title: tip, style: badgeStyle }, amount);
+    const period = balancePeriod
+      ? React.createElement('span', {
+        key: 'period',
+        title: periodTooltip(balancePeriod),
+        style: { ...periodBadgeStyle(balancePeriod.peak), marginLeft: '4px' },
+      }, periodLabel(balancePeriod))
+      : null;
+    return React.createElement('span', {
+      style: { display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    }, money, period);
   }
 
   // ---- 侧边栏工作区行费用（DOM 注入：0.2.x 无工作区行 Slot）----
@@ -323,6 +392,7 @@ function apply(ctx) {
 
   ctx.effect(() => () => {
     if (observer) { try { observer.disconnect(); } catch (e) {} observer = null; }
+    if (periodTimer) { clearTimeout(periodTimer); periodTimer = null; }
   });
 
   // ---- 设置面板：费用显示货币 ----

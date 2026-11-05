@@ -49,20 +49,71 @@ const MODEL_ALIASES: Record<string, string> = {
 
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-/** 北京时间（UTC+8，无夏令时）：返回星期与小时 */
-function beijingClock(ms: number): { day: number; hour: number } {
+/**
+ * 中国法定节假日（放假日，北京时间日期）。来源：国务院办公厅《关于2026年部分节假日安排的通知》
+ * （国办发明电〔2025〕7号，https://www.gov.cn/zhengce/content/202511/content_7047090.htm）。
+ * 官方调价与放假安排每年更新，新年度通知发布后在此追加区间即可；未列入的日期按工作日处理。
+ */
+const CN_HOLIDAY_RANGES: ReadonlyArray<readonly [string, string]> = [
+  ['2026-01-01', '2026-01-03'], // 元旦
+  ['2026-02-15', '2026-02-23'], // 春节
+  ['2026-04-04', '2026-04-06'], // 清明节
+  ['2026-05-01', '2026-05-05'], // 劳动节
+  ['2026-06-19', '2026-06-21'], // 端午节
+  ['2026-09-25', '2026-09-27'], // 中秋节
+  ['2026-10-01', '2026-10-07'], // 国庆节
+];
+
+const CN_HOLIDAYS: ReadonlySet<string> = (() => {
+  const days = new Set<string>();
+  const DAY = 24 * 60 * 60 * 1000;
+  for (const [from, to] of CN_HOLIDAY_RANGES) {
+    const start = Date.parse(from + 'T00:00:00Z');
+    const end = Date.parse(to + 'T00:00:00Z');
+    for (let t = start; t <= end; t += DAY) days.add(new Date(t).toISOString().slice(0, 10));
+  }
+  return days;
+})();
+
+/** 北京时间（UTC+8，无夏令时）：星期、小时与日期键 */
+function beijingClock(ms: number): { day: number; hour: number; date: string } {
   const d = new Date(ms + BEIJING_OFFSET_MS);
-  return { day: d.getUTCDay(), hour: d.getUTCHours() };
+  return {
+    day: d.getUTCDay(),
+    hour: d.getUTCHours(),
+    date: d.toISOString().slice(0, 10),
+  };
 }
 
 /**
- * 高峰时段：北京时间周一至周五 9:00-12:00、14:00-18:00。
- * 官方规则还排除中国法定节假日；这里只按周末排除（节假日按高峰计价，略高估）。
+ * 高峰时段（官方口径）：北京时间周一至周五 9:00-12:00、14:00-18:00，
+ * 且不含中国法定节假日——节假日全天、周末全天均为闲时（含调休上班的周末）。
  */
-function isPeakUtc(ms: number): boolean {
-  const { day, hour } = beijingClock(ms);
+function isPeak(ms: number): boolean {
+  const { day, hour, date } = beijingClock(ms);
   if (day === 0 || day === 6) return false;
+  if (CN_HOLIDAYS.has(date)) return false;
   return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18);
+}
+
+/** 下一次时段切换的时间戳：在未来的北京时间 0/9/12/14/18 点中找第一个状态不同者 */
+function nextPeriodChange(ms: number): number {
+  const current = isPeak(ms);
+  const DAY = 24 * 60 * 60 * 1000;
+  const dayStart = Math.floor((ms + BEIJING_OFFSET_MS) / DAY) * DAY - BEIJING_OFFSET_MS;
+  for (let offset = 0; offset <= 8; offset++) {
+    for (const hour of [0, 9, 12, 14, 18]) {
+      const at = dayStart + offset * DAY + hour * 60 * 60 * 1000;
+      if (at <= ms) continue;
+      if (isPeak(at) !== current) return at;
+    }
+  }
+  return ms + DAY;
+}
+
+/** 当前时段快照（高峰/闲时 + 下次切换时间） */
+function currentPeriod(ms: number = Date.now()): { peak: boolean; nextChangeAt: number } {
+  return { peak: isPeak(ms), nextChangeAt: nextPeriodChange(ms) };
 }
 
 function modelOf(model: string): string {
@@ -78,7 +129,7 @@ function priceOf(
   const table = PRICES[currency] || PRICES.CNY;
   const base = table[modelOf(model)];
   if (!base) return null;
-  const k = isPeakUtc(ms) ? 2 : 1;
+  const k = isPeak(ms) ? 2 : 1;
   return { hit: base.hit * k, miss: base.miss * k, out: base.out * k };
 }
 
@@ -156,7 +207,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.2.0',
+        version: '1.3.0',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -299,41 +350,52 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 会话折叠增量状态：记录最后处理的 seq，只折叠新增事件（key = sessionId + currency） */
-  private foldCache = new Map<string, { replies: MoneyReplyCost[]; conversationCost: number | null; lastSeq: number }>();
+  private foldCache = new Map<
+    string,
+    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; lastSeq: number }
+  >();
 
   /** 折叠会话：增量处理（只读新增事件并追加，避免重复遍历整个日志） */
   private async foldSession(
     sessionId: string,
     currency: 'CNY' | 'USD',
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null }> {
     const key = sessionId + '::' + currency;
     const cached = this.foldCache.get(key);
+    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null };
     const sessionQuery = this.ctx.get('sessionQuery') as
       | { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> }
       | undefined;
-    if (!sessionQuery) return cached ? cached : { replies: [], conversationCost: null };
+    if (!sessionQuery) return cached ? cached : empty;
     let events: Array<Record<string, unknown> & { seq?: number }> = [];
     try {
       const snap = await sessionQuery.readSession(sessionId);
       events = snap && Array.isArray(snap.events) ? (snap.events as Array<Record<string, unknown> & { seq?: number }>) : [];
     } catch (e) {
-      return cached ? { replies: cached.replies, conversationCost: cached.conversationCost } : { replies: [], conversationCost: null };
+      return cached
+        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost }
+        : empty;
     }
     // 增量：从缓存的 lastSeq 之后继续；无缓存则全量
     const fromSeq = cached ? cached.lastSeq : -1;
     const freshReplies: MoneyReplyCost[] = cached ? [...cached.replies] : [];
-    let total = cached ? (cached.conversationCost ?? 0) : 0;
-    let hasCost = cached ? cached.conversationCost != null : false;
+    const carried = {
+      conversationCost: cached ? cached.conversationCost : null,
+      peakCost: cached ? cached.peakCost : null,
+      offPeakCost: cached ? cached.offPeakCost : null,
+    };
     // 只处理 seq > fromSeq 的新增事件
     const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number' ? e.seq > fromSeq : true)) : events;
-    const fold = await this.foldEvents(newEvents, currency, freshReplies, total, hasCost);
+    const fold = await this.foldEvents(newEvents, currency, freshReplies, carried);
     // 更新缓存（重置 TTL）
     this.foldCache.set(key, {
       replies: fold.replies,
       conversationCost: fold.conversationCost,
+      peakCost: fold.peakCost,
+      offPeakCost: fold.offPeakCost,
       lastSeq: this.maxSeq(events),
     });
-    return { replies: fold.replies, conversationCost: fold.conversationCost };
+    return fold;
   }
 
   /** 批量折叠事件（分片异步处理，避免长任务阻塞事件循环） */
@@ -341,11 +403,16 @@ export default class MoneyCostService extends TypertRemoteService {
     events: Array<Record<string, unknown> & { seq?: number }>,
     currency: 'CNY' | 'USD',
     replies: MoneyReplyCost[],
-    total: number,
-    hasCost: boolean,
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
+    carried: { conversationCost: number | null; peakCost: number | null; offPeakCost: number | null },
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null }> {
     const timer = this.ctx.get('timer') as { timeout(ms: number): Promise<void> } | undefined;
     let lastModel = 'deepseek-flash';
+    let total = carried.conversationCost ?? 0;
+    let peakTotal = carried.peakCost ?? 0;
+    let offPeakTotal = carried.offPeakCost ?? 0;
+    let hasCost = carried.conversationCost != null;
+    let hasPeak = carried.peakCost != null;
+    let hasOffPeak = carried.offPeakCost != null;
     const CHUNK = 5000;
     for (let i = 0; i < events.length; i++) {
       if (i % CHUNK === 0 && i > 0) {
@@ -364,17 +431,27 @@ export default class MoneyCostService extends TypertRemoteService {
       const source = (message.source || {}) as Record<string, unknown>;
       const model = typeof source.model === 'string' ? source.model : lastModel;
       const usage = (data.usage || {}) as Record<string, unknown>;
-      const price = priceOf(model, typeof ev.time === 'number' ? ev.time : Date.now(), currency);
+      const time = typeof ev.time === 'number' ? ev.time : Date.now();
+      const peak = isPeak(time);
+      const price = priceOf(model, time, currency);
       const cost = costOf(usage, price);
       if (cost != null) {
         total += cost;
         hasCost = true;
+        if (peak) {
+          peakTotal += cost;
+          hasPeak = true;
+        } else {
+          offPeakTotal += cost;
+          hasOffPeak = true;
+        }
       }
       const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
       replies.push({
         messageId: typeof message.id === 'string' ? message.id : null,
         cost,
         model,
+        peak,
         tokens: {
           input: num(usage.inputTokens),
           cacheRead: num(usage.cacheReadTokens),
@@ -383,7 +460,12 @@ export default class MoneyCostService extends TypertRemoteService {
         },
       });
     }
-    return { replies, conversationCost: hasCost ? total : null };
+    return {
+      replies,
+      conversationCost: hasCost ? total : null,
+      peakCost: hasPeak ? peakTotal : null,
+      offPeakCost: hasOffPeak ? offPeakTotal : null,
+    };
   }
 
   private maxSeq(events: Array<Record<string, unknown> & { seq?: number }>): number {
@@ -440,11 +522,11 @@ export default class MoneyCostService extends TypertRemoteService {
     return { currency: this.currencySetting };
   }
 
-  /** 侧边栏底部余额 */
+  /** 侧边栏底部余额 + 当前时段（高峰/闲时） */
   @Remote('balance')
   async balance(): Promise<MoneyBalanceResult> {
     const balance = await this.cachedBalance();
-    return { balance };
+    return { balance, period: currentPeriod() };
   }
 
   /** 单会话费用总览（余额与费用解耦：余额网络请求不阻塞费用计算） */
@@ -468,11 +550,15 @@ export default class MoneyCostService extends TypertRemoteService {
       currency,
       balance,
       conversationCost: fold.conversationCost,
+      peakCost: fold.peakCost,
+      offPeakCost: fold.offPeakCost,
       lastReplyCost: last ? last.cost : null,
+      period: currentPeriod(),
       replies: fold.replies.map((r) => ({
         messageId: r.messageId,
         cost: r.cost,
         model: r.model,
+        peak: r.peak,
         tokens: r.tokens,
       })),
     };
