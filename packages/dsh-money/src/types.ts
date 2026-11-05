@@ -64,6 +64,10 @@ export interface MoneyWorkspaceCost {
   id: string;
   title: string;
   cost: number | null;
+  /** 高峰时段部分的费用合计 */
+  peakCost: number | null;
+  /** 闲时部分的费用合计 */
+  offPeakCost: number | null;
   sessionCount: number;
 }
 

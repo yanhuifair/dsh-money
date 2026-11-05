@@ -207,7 +207,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.3.0',
+        version: '1.3.1',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -492,18 +492,32 @@ export default class MoneyCostService extends TypertRemoteService {
     for (const w of list) {
       const sessionIds = Array.isArray(w.sessionIds) ? (w.sessionIds as string[]) : [];
       let total = 0;
+      let peakTotal = 0;
+      let offPeakTotal = 0;
       let hasCost = false;
+      let hasPeak = false;
+      let hasOffPeak = false;
       for (const sid of sessionIds) {
         const fold = await this.foldSession(sid, currency);
         if (fold.conversationCost != null) {
           total += fold.conversationCost;
           hasCost = true;
         }
+        if (fold.peakCost != null) {
+          peakTotal += fold.peakCost;
+          hasPeak = true;
+        }
+        if (fold.offPeakCost != null) {
+          offPeakTotal += fold.offPeakCost;
+          hasOffPeak = true;
+        }
       }
       workspaces.push({
         id: typeof w.id === 'string' ? w.id : '',
         title: typeof w.title === 'string' ? w.title : '',
         cost: hasCost ? total : null,
+        peakCost: hasPeak ? peakTotal : null,
+        offPeakCost: hasOffPeak ? offPeakTotal : null,
         sessionCount: sessionIds.length,
       });
     }

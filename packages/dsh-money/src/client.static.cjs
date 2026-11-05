@@ -177,6 +177,17 @@ function apply(ctx) {
     return lines.join('\n');
   }
 
+  /** 悬停明细：本对话总额 + 高峰/闲时分别合计（含条数） */
+  function conversationTooltip(o, currency) {
+    const lines = ['本对话累计费用（估算）: ' + fmtMoney(o.conversationCost, currency)];
+    const replies = Array.isArray(o.replies) ? o.replies : [];
+    let peakCount = 0;
+    for (const r of replies) { if (r && r.peak) peakCount += 1; }
+    lines.push('高峰合计: ' + fmtMoney(o.peakCost == null ? 0 : o.peakCost, currency) + '（' + peakCount + ' 条）');
+    lines.push('闲时合计: ' + fmtMoney(o.offPeakCost == null ? 0 : o.offPeakCost, currency) + '（' + (replies.length - peakCount) + ' 条）');
+    return lines.join('\n');
+  }
+
   // ---- 输入区下方统计行：仅本对话费用 ----
   function CostDock(props) {
     const sessionId = props.sessionId;
@@ -212,7 +223,7 @@ function apply(ctx) {
     },
       React.createElement('span', {
         key: 'conv',
-        title: '本对话累计费用（估算）',
+        title: conversationTooltip(o, currency),
         style: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
       },
         '本对话 ',
@@ -346,7 +357,10 @@ function apply(ctx) {
           continue;
         }
         const text = fmtMoney(entry.cost, wsTable.currency);
-        const tip = '工作区「' + (entry.title || id) + '」总费用: ' + text + '（估算）\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);
+        const tip = '工作区「' + (entry.title || id) + '」总费用: ' + text + '（估算）'
+          + '\n高峰合计: ' + fmtMoney(entry.peakCost == null ? 0 : entry.peakCost, wsTable.currency)
+          + '\n闲时合计: ' + fmtMoney(entry.offPeakCost == null ? 0 : entry.offPeakCost, wsTable.currency)
+          + '\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'dsh-money-ws-badge';
