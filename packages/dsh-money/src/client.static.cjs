@@ -116,6 +116,90 @@ function apply(ctx) {
     };
   }
 
+  // ---- 自绘悬停提示 ----
+  // DSH 桌面端不显示原生 title 提示（浏览器/Electron 窗口内均不可靠），
+  // 这里用自建的单例浮层渲染多行明细；React 徽章与 DOM 注入徽章共用。
+  let tipEl = null;
+  let tipText = '';
+  let tipVisible = false;
+
+  function ensureTip() {
+    if (tipEl || typeof document === 'undefined') return tipEl;
+    tipEl = document.createElement('div');
+    tipEl.setAttribute('data-dsh-money-tip', '');
+    tipEl.style.cssText = [
+      'position:fixed',
+      'z-index:2147483000',
+      'pointer-events:none',
+      'max-width:360px',
+      'padding:8px 10px',
+      'border-radius:8px',
+      'font-size:12px',
+      'line-height:18px',
+      'white-space:pre-line',
+      'word-break:break-word',
+      'color:var(--dsw-alias-label-primary,#f5f5f5)',
+      'background:var(--dsw-alias-bg-elevated,rgba(32,32,36,0.96))',
+      'border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,0.12))',
+      'box-shadow:0 8px 24px rgba(0,0,0,0.28)',
+      'opacity:0',
+      'transform:translateY(2px)',
+      'transition:opacity 120ms ease, transform 120ms ease',
+    ].join(';');
+    try { document.body.appendChild(tipEl); } catch (e) { tipEl = null; }
+    return tipEl;
+  }
+
+  function placeTip(x, y) {
+    const el = ensureTip();
+    if (!el || typeof window === 'undefined') return;
+    const rect = el.getBoundingClientRect();
+    const pad = 12;
+    let left = x + pad;
+    let top = y + pad + 4;
+    if (left + rect.width > window.innerWidth - 8) left = Math.max(8, x - pad - rect.width);
+    if (top + rect.height > window.innerHeight - 8) top = Math.max(8, y - pad - rect.height);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+  }
+
+  function showTip(text, ev) {
+    if (!text) { hideTip(); return; }
+    const el = ensureTip();
+    if (!el || !ev || typeof ev.clientX !== 'number') return;
+    if (text !== tipText) { el.textContent = text; tipText = text; }
+    placeTip(ev.clientX, ev.clientY);
+    el.style.opacity = '1';
+    el.style.transform = 'translateY(0)';
+    tipVisible = true;
+  }
+
+  function hideTip() {
+    if (!tipEl) return;
+    tipEl.style.opacity = '0';
+    tipEl.style.transform = 'translateY(2px)';
+    tipVisible = false;
+  }
+
+  /** React 元素悬停 props：进入显示、移动跟随、离开隐藏 */
+  function tipProps(text) {
+    return {
+      onMouseEnter: (e) => showTip(text, e),
+      onMouseMove: (e) => { if (tipVisible) placeTip(e.clientX, e.clientY); },
+      onMouseLeave: hideTip,
+    };
+  }
+
+  // 兜底：点击或滚动时收起浮层，避免组件卸载/行重建后提示残留
+  const hideOnAny = () => hideTip();
+
+  /** DOM 注入徽章的等价监听（一次性绑定，文案由 badge.__dshMoneyTip 提供） */
+  function bindTip(badge) {
+    badge.addEventListener('mouseenter', (e) => showTip(badge.__dshMoneyTip, e));
+    badge.addEventListener('mousemove', (e) => { if (tipVisible) placeTip(e.clientX, e.clientY); });
+    badge.addEventListener('mouseleave', hideTip);
+  }
+
   function periodLabel(period) {
     return period && period.peak ? '高峰' : '闲时';
   }
@@ -207,14 +291,16 @@ function apply(ctx) {
     if (o.peakCost != null && o.peakCost > 0) {
       parts.push(React.createElement('span', {
         key: 'peak',
-        title: '高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）的累计费用（估算）',
+        'aria-label': '高峰时段累计费用（估算）',
+        ...tipProps('高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）的累计费用（估算）'),
         style: periodBadgeStyle(true),
       }, '高峰 ' + fmtMoney(o.peakCost, currency)));
     }
     if (o.offPeakCost != null && o.offPeakCost > 0) {
       parts.push(React.createElement('span', {
         key: 'offpeak',
-        title: '闲时（含周末与法定节假日）的累计费用（估算）',
+        'aria-label': '闲时累计费用（估算）',
+        ...tipProps('闲时（含周末与法定节假日）的累计费用（估算）'),
         style: periodBadgeStyle(false),
       }, '闲时 ' + fmtMoney(o.offPeakCost, currency)));
     }
@@ -223,7 +309,8 @@ function apply(ctx) {
     },
       React.createElement('span', {
         key: 'conv',
-        title: conversationTooltip(o, currency),
+        'aria-label': '本对话累计费用（估算）',
+        ...tipProps(conversationTooltip(o, currency)),
         style: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
       },
         '本对话 ',
@@ -253,7 +340,8 @@ function apply(ctx) {
     if (!reply || reply.cost == null) return null;
     return React.createElement('span', {
       className: 'dsh-cost-reply',
-      title: replyTooltip(reply, currency),
+      'aria-label': '本次回复费用（估算）',
+      ...tipProps(replyTooltip(reply, currency)),
       style: { ...badgeStyle, marginLeft: '4px', marginRight: '2px' },
     }, fmtMoney(reply.cost, currency));
   }
@@ -303,13 +391,14 @@ function apply(ctx) {
     if (!wide) {
       // 56px 折叠态：只显示币种符号，避免挤压设置按钮
       const sym = balance && balance.currency === 'USD' ? '$' : '¥';
-      return React.createElement('span', { title: tip, style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
+      return React.createElement('span', { 'aria-label': '账号剩余金额', ...tipProps(tip), style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
     }
-    const money = React.createElement('span', { key: 'money', title: tip, style: badgeStyle }, amount);
+    const money = React.createElement('span', { key: 'money', 'aria-label': '账号剩余金额', ...tipProps(tip), style: badgeStyle }, amount);
     const period = balancePeriod
       ? React.createElement('span', {
         key: 'period',
-        title: periodTooltip(balancePeriod),
+        'aria-label': periodLabel(balancePeriod) + '时段',
+        ...tipProps(periodTooltip(balancePeriod)),
         style: { ...periodBadgeStyle(balancePeriod.peak), marginLeft: '4px' },
       }, periodLabel(balancePeriod))
       : null;
@@ -365,10 +454,11 @@ function apply(ctx) {
           badge = document.createElement('span');
           badge.className = 'dsh-money-ws-badge';
           badge.style.cssText = 'color:#f0c11d;font-size:11px;padding:0 4px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;';
+          bindTip(badge);
           row.appendChild(badge);
         }
         if (badge.textContent !== text) badge.textContent = text;
-        if (badge.title !== tip) badge.title = tip;
+        if (badge.__dshMoneyTip !== tip) badge.__dshMoneyTip = tip;
       }
     } catch (e) {
       // 忽略 DOM 竞态
@@ -404,9 +494,21 @@ function apply(ctx) {
     ctx.effect(() => () => { disposeWs(); disposeBalance(); });
   }
 
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('mousedown', hideOnAny, true);
+    document.addEventListener('scroll', hideOnAny, true);
+  }
+
   ctx.effect(() => () => {
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('mousedown', hideOnAny, true);
+      document.removeEventListener('scroll', hideOnAny, true);
+    }
     if (observer) { try { observer.disconnect(); } catch (e) {} observer = null; }
     if (periodTimer) { clearTimeout(periodTimer); periodTimer = null; }
+    hideTip();
+    if (tipEl && tipEl.parentNode) { try { tipEl.parentNode.removeChild(tipEl); } catch (e) {} }
+    tipEl = null;
   });
 
   // ---- 设置面板：费用显示货币 ----
