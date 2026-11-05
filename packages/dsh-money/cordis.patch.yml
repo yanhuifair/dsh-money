@@ -1,0 +1,6 @@
+# dsh-money bundle layer — mounted when the profile selects this bundle.
+# `dsh plugin add dsh-money` (or the Web Plugins page) installs and enables it;
+# no hand-written row in the profile's cordis.patch.yml is needed.
+- insert:
+    - id: money
+      name: 'dsh-money'

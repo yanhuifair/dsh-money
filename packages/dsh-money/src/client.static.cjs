@@ -1,15 +1,16 @@
 /**
- * dsh-money — Client 半段（静态插件版，__ModuleLoader__ bundle 入口）
+ * dsh-money — Client 半段（静态插件版，__ModuleLoader__ bundle 入口，适配 DSH 0.2.x）
  *
- * UI：
- *  - conversation.composer.dock：输入区下方统计行（仅本对话费用，金色徽章）
- *  - conversation.chat.assistant-actions：每条回复费用标签（分支按钮右侧，悬停明细）
+ * UI（全部走 Slot 注册，不再依赖已移除的 data-slot DOM 锚点）：
+ *  - conversation.composer.dock：输入区下方统计行（本对话费用，金色徽章）
+ *  - conversation.chat.assistant-actions：每条回复费用标签（悬停明细）
  *  - settings.general.item：费用显示货币设置行
- *  - 侧边栏 DOM 注入：工作区行（div[role=treeitem][aria-expanded]）总费用徽章
- *  - 侧边栏底部余额：DOM 注入行，插在设置按钮之后（最底部，左对齐，背景包裹文字）
+ *  - sidebar.footer.action：侧边栏底部余额徽章（设置按钮旁）
+ *  - 侧边栏工作区行：按 data-row-key="workspace:<id>" 注入工作区总费用徽章
+ *    （DSH 0.2.x 没有工作区行 Slot，只能用稳定的行标识做 DOM 注入，失败时静默降级）
  *
  * 与动态插件差异：无全局 host/styles/React；经 ctx.remote.moneyCost.* 调 Host，
- * React 由 require('react') 引入，CSS 手动注入 <style>。
+ * React 由 require('react') 引入。
  *
  * 注意：本文件不直接声明 remote.moneyCost 依赖 —— 该命名空间由打包入口
  * client.entry.js 在 apply() 中先 ctx.remote.$mount(TYPERT_REMOTE) 挂载，
@@ -24,27 +25,20 @@ const React = require('react');
 const inject = ['slots', 'remote', 'timer'];
 
 function apply(ctx) {
-  const remote = (ctx && ctx.remote) ? ctx.remote.moneyCost : null;
+  const remote = ctx && ctx.remote ? ctx.remote.moneyCost : null;
   if (!remote) return;
-
-  // 手动注入布局 CSS（静态插件无 styles 全局）
-  // 布局目标：[复制][反馈][分支][费用][时间戳]
-  // 费用标签（.dsh-cost-reply）自身 order:100；此规则把该行的时间戳（最后一个子元素）
-  // order 提到 101，排到费用标签之后。:has() 仅匹配含费用标签的行，浏览器有优化，实测非性能瓶颈。
-  const CSS_ID = 'dsh-money-layout-css';
-  if (typeof document !== 'undefined' && !document.querySelector('style[data-dsh-money="' + CSS_ID + '"]')) {
-    const tag = document.createElement('style');
-    tag.dataset.dshMoney = CSS_ID;
-    tag.textContent =
-      'div[data-slot="conversation.chat.assistant-actions"]:has(.dsh-cost-reply) ~ :last-child { order: 101; }';
-    document.head.appendChild(tag);
-  }
 
   const bySession = new Map();
   // 会话 replies 的 messageId → reply 索引（数据到达时构建一次，组件 O(1) 查找）
   const replyIndex = new Map();
   const listeners = new Set();
   const inflight = new Map();
+
+  // 余额（侧边栏底部件共享状态：只请求一次，订阅者重渲染）
+  const balanceListeners = new Set();
+  let balance = null;
+  let balanceLoaded = false;
+  let balanceInflight = false;
 
   let currencySetting = 'auto';
   const currencyListeners = new Set();
@@ -154,9 +148,6 @@ function apply(ctx) {
   // ---- 输入区下方统计行：仅本对话费用 ----
   function CostDock(props) {
     const sessionId = props.sessionId;
-    const session = props.session;
-    const turns = session && session.turnEnds ? session.turnEnds.size : 0;
-    const nodes = session && session.nodes ? session.nodes.length : 0;
     const [overview, setOverview] = React.useState(undefined);
     React.useEffect(() => {
       // 只依赖 sessionId：订阅 + 刷新与对话快照变化解耦，
@@ -183,7 +174,7 @@ function apply(ctx) {
     );
   }
 
-  // ---- 每条回复的费用标签（分支按钮右侧）----
+  // ---- 每条回复的费用标签（操作按钮行内）----
   // 性能：不独立请求/订阅（历史回复可能成百上千条，逐个请求+订阅会拖慢打开对话）。
   // 改为读取共享快照：由 CostDock 统一 refresh，数据到达后通过 notify 驱动本组件重渲染。
   function ReplyCost(props) {
@@ -204,18 +195,54 @@ function apply(ctx) {
     return React.createElement('span', {
       className: 'dsh-cost-reply',
       title: replyTooltip(reply, currency),
-      style: { ...badgeStyle, order: 100, marginLeft: '2px' },
+      style: { ...badgeStyle, marginLeft: '4px', marginRight: '2px' },
     }, fmtMoney(reply.cost, currency));
   }
 
-  // ---- 侧边栏 DOM 注入（工作区行徽章 + 底部余额行）----
+  // ---- 侧边栏底部余额（sidebar.footer.action Slot）----
+  function loadBalance() {
+    if (balanceInflight) return;
+    balanceInflight = true;
+    remote.balance()
+      .then((res) => {
+        const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
+        if (value && typeof value === 'object') {
+          balance = value.balance || null;
+          balanceLoaded = true;
+          for (const fn of Array.from(balanceListeners)) {
+            try { fn(balance); } catch (e) {}
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => { balanceInflight = false; });
+  }
+
+  function BalanceAction(props) {
+    const [, force] = React.useState(0);
+    React.useEffect(() => {
+      const fn = () => force((n) => n + 1);
+      balanceListeners.add(fn);
+      if (!balanceLoaded) loadBalance();
+      return () => { balanceListeners.delete(fn); };
+    }, []);
+    if (!balanceLoaded) return null;
+    const wide = !(props && props.wide === false);
+    const amount = fmtBalance(balance);
+    const tip = '账号剩余金额（自动刷新）' + (balance && balance.source === 'api-key' ? '\n来源: API Key 余额' : '');
+    if (!wide) {
+      // 56px 折叠态：只显示币种符号，避免挤压设置按钮
+      const sym = balance && balance.currency === 'USD' ? '$' : '¥';
+      return React.createElement('span', { title: tip, style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
+    }
+    return React.createElement('span', { title: tip, style: badgeStyle }, amount);
+  }
+
+  // ---- 侧边栏工作区行费用（DOM 注入：0.2.x 无工作区行 Slot）----
   let observer = null;
-  let injected = false;
+  let started = false;
   let applying = false;
   let wsTable = null;
-  let wsContainer = null;
-  let balance = null;
-  let balanceLoaded = false;
 
   function loadWsTable() {
     remote.workspacesAll()
@@ -229,70 +256,28 @@ function apply(ctx) {
       .catch(() => {});
   }
 
-  function loadBalance() {
-    remote.balance()
-      .then((res) => {
-        const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
-        if (value && typeof value === 'object') {
-          balance = value.balance || null;
-          balanceLoaded = true;
-          applyBadges();
-        }
-      })
-      .catch(() => {});
-  }
-
-  // 余额行：插到 settingsArea（设置）之后，即侧边栏最底部；左对齐，背景包裹文字
-  function renderBalanceRow() {
-    if (!balanceLoaded) return;
-    const brandName = document.querySelector('[data-slot="sidebar.brand.name"]');
-    const settingsSlot = document.querySelector('[data-slot="sidebar.settings"]');
-    let row = document.querySelector('.dsh-money-balance-row');
-    if (!brandName || !settingsSlot || !settingsSlot.parentElement || !settingsSlot.parentElement.parentElement) {
-      if (row) row.remove();
-      return;
-    }
-    const settingsArea = settingsSlot.parentElement;
-    const footArea = settingsArea.parentElement;
-    const text = '余额 ' + fmtBalance(balance);
-    const tip = '账号剩余金额（自动刷新）';
-    if (!row) {
-      row = document.createElement('div');
-      row.className = 'dsh-money-balance-row';
-      row.style.cssText = 'color:#f0c11d;font-size:11px;padding:2px 12px;border-radius:8px;background:rgba(128,128,128,0.12);margin:2px 0 0;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;text-align:left;align-self:flex-start;max-width:100%;';
-      footArea.insertBefore(row, settingsArea.nextSibling);
-    }
-    if (row.textContent !== text) row.textContent = text;
-    if (row.title !== tip) row.title = tip;
-  }
-
   function applyBadges() {
     if (applying) return;
     applying = true;
     if (observer) { try { observer.disconnect(); } catch (e) {} }
     try {
-      if (typeof document === 'undefined') return;
-      renderBalanceRow();
-      if (!wsTable || !Array.isArray(wsTable.workspaces)) return;
-      wsContainer = document.querySelector('[data-slot="sidebar.workspaces"]') || document.body;
-      const rows = wsContainer.querySelectorAll('div[role="treeitem"][aria-expanded]');
-      const byTitle = new Map(wsTable.workspaces.map((w) => [w.title, w]));
+      if (typeof document === 'undefined' || !wsTable || !Array.isArray(wsTable.workspaces)) return;
+      const byId = new Map();
+      for (const entry of wsTable.workspaces) {
+        if (entry && typeof entry.id === 'string') byId.set(entry.id, entry);
+      }
+      const rows = document.querySelectorAll('[data-row-key^="workspace:"]');
       for (const row of rows) {
-        let label = '';
-        const spans = row.querySelectorAll('span');
-        for (const sp of spans) {
-          const t = (sp.textContent || '').trim();
-          if (t && t.length > 1 && !t.includes('¥') && !t.includes('$')) { label = t; break; }
-        }
-        if (!label) continue;
-        const entry = byTitle.get(label);
+        const key = row.getAttribute('data-row-key') || '';
+        const id = key.slice('workspace:'.length);
+        const entry = byId.get(id);
         let badge = row.querySelector('.dsh-money-ws-badge');
         if (!entry || entry.cost == null) {
           if (badge) badge.remove();
           continue;
         }
         const text = fmtMoney(entry.cost, wsTable.currency);
-        const tip = '工作区「' + label + '」总费用: ' + text + '（估算）\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);
+        const tip = '工作区「' + (entry.title || id) + '」总费用: ' + text + '（估算）\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'dsh-money-ws-badge';
@@ -306,19 +291,19 @@ function apply(ctx) {
       // 忽略 DOM 竞态
     } finally {
       applying = false;
-      if (observer && wsContainer) {
-        try { observer.observe(wsContainer, { childList: true, subtree: true }); } catch (e) {}
+      if (observer && typeof document !== 'undefined') {
+        try { observer.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
       }
     }
   }
 
   function startSidebarObserver() {
-    if (injected) return;
-    injected = true;
+    if (started) return;
+    started = true;
     loadWsTable();
     loadBalance();
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
-      // 节流：侧边栏高频 DOM 变化（滚动/展开）合并为一次 applyBadges，避免频繁全量扫描
+      // 节流：侧边栏高频 DOM 变化（滚动/展开/流式渲染）合并为一次 applyBadges
       let badgeTimer = null;
       const scheduleBadges = () => {
         if (badgeTimer) return;
@@ -328,13 +313,12 @@ function apply(ctx) {
         }, 150);
       };
       observer = new MutationObserver(() => { scheduleBadges(); });
-      const root = document.querySelector('[data-slot="sidebar"]') || document.body;
-      wsContainer = root;
-      observer.observe(root, { childList: true, subtree: true });
+      try { observer.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
       ctx.effect(() => () => { if (badgeTimer) { clearTimeout(badgeTimer); badgeTimer = null; } });
     }
-    const disposeRefresh = ctx.interval(() => loadBalance(), 60000);
-    ctx.effect(() => disposeRefresh);
+    const disposeWs = ctx.interval(() => loadWsTable(), 60000);
+    const disposeBalance = ctx.interval(() => loadBalance(), 60000);
+    ctx.effect(() => () => { disposeWs(); disposeBalance(); });
   }
 
   ctx.effect(() => () => {
@@ -369,6 +353,7 @@ function apply(ctx) {
         .then(() => {
           setCurrency(next);
           loadWsTable();
+          balanceLoaded = false;
           loadBalance();
           for (const sid of Array.from(bySession.keys())) refresh(sid);
         })
@@ -430,6 +415,7 @@ function apply(ctx) {
   injectSlot('conversation.composer.dock', 'cost-meter', 5, (props) => React.createElement(CostDock, props));
   injectSlot('conversation.chat.assistant-actions', 'reply-cost', 20, (props) => React.createElement(ReplyCost, props));
   injectSlot('settings.general.item', 'cost-currency', 30, () => React.createElement(CurrencySettingRow));
+  injectSlot('sidebar.footer.action', 'money-balance', 10, (props) => React.createElement(BalanceAction, props));
 
   startSidebarObserver();
 }

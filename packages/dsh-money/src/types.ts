@@ -8,6 +8,8 @@
 export interface MoneyBalanceInfo {
   currency: string;
   total: number;
+  /** 余额来源：登录账号（Platform）或 API Key；缺失时客户端按未知处理 */
+  source?: 'account' | 'api-key';
 }
 
 /** 单条回复 token 用量 */
@@ -42,6 +44,8 @@ export interface MoneyCostOverview {
 
 /** 工作区费用条目 */
 export interface MoneyWorkspaceCost {
+  /** 工作区 id（侧边栏行的 data-row-key 使用同一 id） */
+  id: string;
   title: string;
   cost: number | null;
   sessionCount: number;

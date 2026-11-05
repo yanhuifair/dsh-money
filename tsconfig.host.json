@@ -12,10 +12,13 @@
     "baseUrl": ".",
     "paths": {
       "@deepseek-ai/dsh-typert-protocol": [
-        "packages/typert-protocol/src/types/index.ts"
+        "packages/typert-protocol/src/index.ts"
+      ],
+      "@deepseek-ai/dsh-typert-protocol/remote-info": [
+        "packages/typert-protocol/src/remote-info.ts"
       ],
       "@deepseek-ai/dsh-typert-protocol/types": [
-        "packages/typert-protocol/src/types/types.ts"
+        "packages/typert-protocol/src/types.ts"
       ]
     }
   }

@@ -1,13 +1,16 @@
 /**
- * dsh-money — Host 半段（静态插件版）
+ * dsh-money — Host 半段（静态插件版，适配 DeepSeek Harness 0.2.x）
  *
  * 以标准 DSH 静态插件形式提供：TypertRemoteService + @Remote 装饰器声明
  * 四个远端方法（config / balance / overview / workspacesAll），client 半段
  * 通过 ctx.remote.moneyCost.* 调用。
  *
- * 计价口径（DeepSeek 官方价格页 2026-08 版，高峰价 = 空闲价 × 2）：
- *  高峰时段 = 北京时间 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00）
- *  账单 = 未命中输入(含 cache write) × miss 价 + 缓存命中 × hit 价 + 输出 × out 价
+ * 计价口径 —— DeepSeek 官方价格页 2026-11 版
+ * https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+ *  · 模型：deepseek-flash（旧名 deepseek-v4-flash 仍按 Flash 计费）、deepseek-v4-pro
+ *  · 高峰时段 = 北京时间周一至周五 9:00-12:00、14:00-18:00，价格 = 空闲价 × 2
+ *  · 账单 = 未命中输入(含 cache write) × miss 价 + 缓存命中 × hit 价 + 输出 × out 价
+ *  · 中国法定节假日暂按工作日计（会略微高估，见 README）
  */
 
 import { Context, Service } from '@deepseek-ai/cordis';
@@ -23,24 +26,48 @@ import type {
 } from './types.js';
 
 /**
- * 每百万 token 单价：人民币与美元两套价目
+ * 每百万 token 单价：人民币与美元两套价目（空闲时段，高峰 × 2）
  * 来源：DeepSeek 官方价格页 https://api-docs.deepseek.com/zh-cn/quick_start/pricing
- * 更新日期：2026-08（官方调价时需同步更新并升级版本）
+ * 更新日期：2026-11（官方调价时需同步更新并升级版本）
  */
 const PRICES: Record<string, Record<string, { hit: number; miss: number; out: number }>> = {
   CNY: {
-    'deepseek-v4-flash': { hit: 0.05, miss: 1.5, out: 4.5 },
+    'deepseek-flash': { hit: 0.02, miss: 1, out: 4 },
     'deepseek-v4-pro': { hit: 0.15, miss: 4.5, out: 13.5 },
   },
   USD: {
-    'deepseek-v4-flash': { hit: 0.007, miss: 0.22, out: 0.66 },
+    'deepseek-flash': { hit: 0.003, miss: 0.15, out: 0.6 },
     'deepseek-v4-pro': { hit: 0.022, miss: 0.66, out: 1.98 },
   },
 };
 
+/** 旧模型名 → 当前计费模型（官方：旧名仍可调用，按 Flash 价计费） */
+const MODEL_ALIASES: Record<string, string> = {
+  'deepseek-v4-flash': 'deepseek-flash',
+  'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+};
+
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** 北京时间（UTC+8，无夏令时）：返回星期与小时 */
+function beijingClock(ms: number): { day: number; hour: number } {
+  const d = new Date(ms + BEIJING_OFFSET_MS);
+  return { day: d.getUTCDay(), hour: d.getUTCHours() };
+}
+
+/**
+ * 高峰时段：北京时间周一至周五 9:00-12:00、14:00-18:00。
+ * 官方规则还排除中国法定节假日；这里只按周末排除（节假日按高峰计价，略高估）。
+ */
 function isPeakUtc(ms: number): boolean {
-  const h = new Date(ms).getUTCHours();
-  return (h >= 1 && h < 4) || (h >= 6 && h < 10);
+  const { day, hour } = beijingClock(ms);
+  if (day === 0 || day === 6) return false;
+  return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18);
+}
+
+function modelOf(model: string): string {
+  const key = (model || '').trim().toLowerCase();
+  return MODEL_ALIASES[key] ?? key;
 }
 
 function priceOf(
@@ -49,7 +76,7 @@ function priceOf(
   currency: string,
 ): { hit: number; miss: number; out: number } | null {
   const table = PRICES[currency] || PRICES.CNY;
-  const base = table[model];
+  const base = table[modelOf(model)];
   if (!base) return null;
   const k = isPeakUtc(ms) ? 2 : 1;
   return { hit: base.hit * k, miss: base.miss * k, out: base.out * k };
@@ -61,11 +88,40 @@ function costOf(
   price: { hit: number; miss: number; out: number } | null,
 ): number | null {
   if (!usage || !price) return null;
-  const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const input = num(usage.inputTokens) + num(usage.cacheWriteTokens);
   const hit = num(usage.cacheReadTokens);
   const out = num(usage.outputTokens);
   return (input * price.miss + hit * price.hit + out * price.out) / 1e6;
+}
+
+/** 从 settings 描述里按 provider.settingsPath 取当前值 */
+function pickPath(value: unknown, path: readonly string[]): unknown {
+  let cursor = value;
+  for (const key of path) {
+    if (!cursor || typeof cursor !== 'object') return undefined;
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return cursor;
+}
+
+interface AccountWalletLike {
+  currency?: unknown;
+  balance?: unknown;
+}
+
+interface AccountDetailsLike {
+  status?: unknown;
+  value?: unknown;
+  bonusWallets?: unknown;
+}
+
+interface LlmProviderLike {
+  provider?: unknown;
+  settingsNs?: unknown;
+  settingsPath?: unknown;
+  defaultBaseURL?: unknown;
+  nativeAuth?: { env?: unknown } | unknown;
 }
 
 /**
@@ -91,58 +147,136 @@ export default class MoneyCostService extends TypertRemoteService {
     };
   }
 
-  private async fetchBalance(): Promise<MoneyBalanceInfo | null> {
-    let baseURL = 'https://api.deepseek.com';
-    let apiKeyEnv = 'DEEPSEEK_API_KEY';
+  /** 登录账号余额：ctx.deepseekAccount（DSH 0.2.x 的内置账号服务） */
+  private async accountBalance(): Promise<MoneyBalanceInfo | null> {
+    const account = this.ctx.get('deepseekAccount') as
+      | { getBalance(client: { version: string; locale: string; timezoneOffsetSeconds: number }): Promise<AccountDetailsLike | null> }
+      | undefined;
+    if (!account || typeof account.getBalance !== 'function') return null;
+    let details: AccountDetailsLike | null = null;
     try {
-      const settings = this.ctx.get('settings') as { get(ns: string): unknown } | undefined;
-      if (settings) {
-        const cfg = settings.get('llm-deepseek') as Record<string, unknown> | null;
-        if (cfg && typeof cfg === 'object') {
-          if (typeof cfg.baseURL === 'string' && cfg.baseURL) baseURL = cfg.baseURL;
-          if (typeof cfg.apiKeyEnv === 'string' && cfg.apiKeyEnv) apiKeyEnv = cfg.apiKeyEnv;
-        }
-      }
+      details = await account.getBalance({
+        version: '1.2.0',
+        locale: 'zh-CN',
+        timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+      });
     } catch (e) {
-      // 忽略设置读取失败
+      return null;
     }
+    if (!details || details.status !== 'ready' || !Array.isArray(details.value)) return null;
+    const wallets: AccountWalletLike[] = [
+      ...(details.value as AccountWalletLike[]),
+      ...(Array.isArray(details.bonusWallets) ? (details.bonusWallets as AccountWalletLike[]) : []),
+    ].filter((w): w is AccountWalletLike => !!w && typeof w === 'object');
+    if (!wallets.length) return null;
+    const wanted = this.currencySetting === 'auto' ? null : this.currencySetting;
+    const currencyOf = (w: AccountWalletLike): string => (typeof w.currency === 'string' ? w.currency : 'CNY');
+    const currency = wanted ?? currencyOf(wallets[0]);
+    let total = 0;
+    let found = false;
+    for (const wallet of wallets) {
+      if (currencyOf(wallet) !== currency) continue;
+      const value = Number(wallet.balance);
+      if (!Number.isFinite(value)) continue;
+      total += value;
+      found = true;
+    }
+    if (!found) return null;
+    return { currency, total, source: 'account' };
+  }
+
+  /** 当前 DeepSeek provider 的目录项（用于 baseURL / API Key 环境变量） */
+  private deepseekProvider(): LlmProviderLike | undefined {
+    const llm = this.ctx.get('llm') as { listConfigurableProviders?(): LlmProviderLike[] } | undefined;
+    if (!llm || typeof llm.listConfigurableProviders !== 'function') return undefined;
+    let entries: LlmProviderLike[] = [];
+    try {
+      entries = llm.listConfigurableProviders();
+    } catch (e) {
+      return undefined;
+    }
+    if (!Array.isArray(entries)) return undefined;
+    const envOf = (entry: LlmProviderLike): string[] => {
+      const nativeAuth = entry.nativeAuth;
+      const env = nativeAuth && typeof nativeAuth === 'object' ? (nativeAuth as { env?: unknown }).env : undefined;
+      return Array.isArray(env) ? env.filter((name): name is string => typeof name === 'string') : [];
+    };
+    return (
+      entries.find((entry) => entry.provider === 'deepseek') ??
+      entries.find((entry) => envOf(entry).includes('DEEPSEEK_API_KEY')) ??
+      entries.find((entry) => envOf(entry).length > 0)
+    );
+  }
+
+  /** 读取 provider 当前生效的 baseURL（settings 覆盖 → provider 默认值） */
+  private providerBaseURL(provider: LlmProviderLike | undefined): string {
+    const fallback =
+      provider && typeof provider.defaultBaseURL === 'string' && provider.defaultBaseURL
+        ? provider.defaultBaseURL
+        : 'https://api.deepseek.com';
+    const settingsNs = provider && typeof provider.settingsNs === 'string' ? provider.settingsNs : undefined;
+    if (!settingsNs) return fallback;
+    const settings = this.ctx.get('settings') as
+      | { describe?(): Array<{ ns?: unknown; value?: unknown }> }
+      | undefined;
+    if (!settings || typeof settings.describe !== 'function') return fallback;
+    try {
+      const descriptor = settings.describe().find((entry) => entry && entry.ns === settingsNs);
+      const path = Array.isArray(provider?.settingsPath)
+        ? (provider.settingsPath as unknown[]).filter((key): key is string => typeof key === 'string')
+        : [];
+      const value = pickPath(descriptor?.value, path);
+      return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  /** API Key 余额：credentials 解析 + GET /user/balance（DSH 0.2.x 无 shell.run） */
+  private async apiKeyBalance(): Promise<MoneyBalanceInfo | null> {
+    const provider = this.deepseekProvider();
+    const envOfProvider = (() => {
+      const nativeAuth = provider?.nativeAuth;
+      const env = nativeAuth && typeof nativeAuth === 'object' ? (nativeAuth as { env?: unknown }).env : undefined;
+      const list = Array.isArray(env) ? env.filter((name): name is string => typeof name === 'string') : [];
+      return list[0] ?? 'DEEPSEEK_API_KEY';
+    })();
+    const credentials = this.ctx.get('credentials') as
+      | { resolve(ref: string): Promise<{ value?: unknown } | undefined> }
+      | undefined;
+    if (!credentials || typeof credentials.resolve !== 'function') return null;
     let key: string | null = null;
     try {
-      const credentials = this.ctx.get('credentials') as { resolve(ref: string): Promise<{ value?: unknown } | undefined> } | undefined;
-      if (credentials) {
-        const hit = await credentials.resolve(apiKeyEnv);
-        if (hit && typeof hit.value === 'string' && hit.value) key = hit.value;
-      }
+      const hit = await credentials.resolve(envOfProvider);
+      if (hit && typeof hit.value === 'string' && hit.value) key = hit.value;
     } catch (e) {
-      // 忽略凭据解析失败
+      return null;
     }
     if (!key) return null;
-    const shell = this.ctx.get('shell') as { resolve(spec: object): { run(spec: object): Promise<{ exitCode?: number; stdout?: { text: string } }> }; run(spec: object): Promise<{ exitCode?: number; stdout?: { text: string } }> } | undefined;
-    if (!shell) return null;
-    let result: { exitCode?: number; stdout?: { text: string } };
+    const baseURL = this.providerBaseURL(provider).replace(/\/+$/, '');
+    let body: { balance_infos?: unknown };
     try {
-      const spec = shell.resolve({
-        command: `curl -sS -m 10 -H "Authorization: Bearer ${key}" "${baseURL}/user/balance"`,
-        timeoutMs: 15000,
-        stdoutMaxBytes: 1048576,
+      const response = await fetch(`${baseURL}/user/balance`, {
+        headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(10000),
       });
-      result = await shell.run(spec);
+      if (!response.ok) return null;
+      body = (await response.json()) as { balance_infos?: unknown };
     } catch (e) {
       return null;
     }
-    if (!result || result.exitCode !== 0) return null;
-    let body: { balance_infos?: Array<Record<string, unknown>> };
-    try {
-      body = JSON.parse(result.stdout?.text || '{}');
-    } catch (e) {
-      return null;
-    }
-    if (!body || !Array.isArray(body.balance_infos) || !body.balance_infos.length) return null;
+    const list = body && Array.isArray(body.balance_infos) ? (body.balance_infos as Array<Record<string, unknown>>) : [];
+    if (!list.length) return null;
     const wanted = this.currencySetting === 'CNY' || this.currencySetting === 'USD' ? this.currencySetting : null;
-    const matched = wanted
-      ? body.balance_infos.find((i) => i && i.currency === wanted)
-      : undefined;
-    return this.normalizeBalanceInfo(matched || body.balance_infos[0]);
+    const matched = wanted ? list.find((item) => item && item.currency === wanted) : undefined;
+    const info = this.normalizeBalanceInfo(matched || list[0]);
+    return info ? { ...info, source: 'api-key' } : null;
+  }
+
+  private async fetchBalance(): Promise<MoneyBalanceInfo | null> {
+    const account = await this.accountBalance();
+    if (account) return account;
+    return this.apiKeyBalance();
   }
 
   private async cachedBalance(): Promise<MoneyBalanceInfo | null> {
@@ -166,7 +300,6 @@ export default class MoneyCostService extends TypertRemoteService {
 
   /** 会话折叠增量状态：记录最后处理的 seq，只折叠新增事件（key = sessionId + currency） */
   private foldCache = new Map<string, { replies: MoneyReplyCost[]; conversationCost: number | null; lastSeq: number }>();
-  private readonly FOLD_TTL_MS = 60000;
 
   /** 折叠会话：增量处理（只读新增事件并追加，避免重复遍历整个日志） */
   private async foldSession(
@@ -175,7 +308,9 @@ export default class MoneyCostService extends TypertRemoteService {
   ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
     const key = sessionId + '::' + currency;
     const cached = this.foldCache.get(key);
-    const sessionQuery = this.ctx.get('sessionQuery') as { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> } | undefined;
+    const sessionQuery = this.ctx.get('sessionQuery') as
+      | { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> }
+      | undefined;
     if (!sessionQuery) return cached ? cached : { replies: [], conversationCost: null };
     let events: Array<Record<string, unknown> & { seq?: number }> = [];
     try {
@@ -190,8 +325,8 @@ export default class MoneyCostService extends TypertRemoteService {
     let total = cached ? (cached.conversationCost ?? 0) : 0;
     let hasCost = cached ? cached.conversationCost != null : false;
     // 只处理 seq > fromSeq 的新增事件
-    const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number') ? e.seq > fromSeq : true) : events;
-    const fold = await this.foldEvents(newEvents, currency, freshReplies, total, hasCost, cached ? true : false);
+    const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number' ? e.seq > fromSeq : true)) : events;
+    const fold = await this.foldEvents(newEvents, currency, freshReplies, total, hasCost);
     // 更新缓存（重置 TTL）
     this.foldCache.set(key, {
       replies: fold.replies,
@@ -208,10 +343,9 @@ export default class MoneyCostService extends TypertRemoteService {
     replies: MoneyReplyCost[],
     total: number,
     hasCost: boolean,
-    incremental: boolean,
   ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null }> {
     const timer = this.ctx.get('timer') as { timeout(ms: number): Promise<void> } | undefined;
-    let lastModel = 'deepseek-v4-flash';
+    let lastModel = 'deepseek-flash';
     const CHUNK = 5000;
     for (let i = 0; i < events.length; i++) {
       if (i % CHUNK === 0 && i > 0) {
@@ -228,8 +362,7 @@ export default class MoneyCostService extends TypertRemoteService {
       const data = (ev.data || {}) as Record<string, unknown>;
       const message = (data.message || {}) as Record<string, unknown>;
       const source = (message.source || {}) as Record<string, unknown>;
-      const model =
-        typeof source.model === 'string' ? source.model : lastModel;
+      const model = typeof source.model === 'string' ? source.model : lastModel;
       const usage = (data.usage || {}) as Record<string, unknown>;
       const price = priceOf(model, typeof ev.time === 'number' ? ev.time : Date.now(), currency);
       const cost = costOf(usage, price);
@@ -237,7 +370,7 @@ export default class MoneyCostService extends TypertRemoteService {
         total += cost;
         hasCost = true;
       }
-      const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+      const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
       replies.push({
         messageId: typeof message.id === 'string' ? message.id : null,
         cost,
@@ -263,9 +396,11 @@ export default class MoneyCostService extends TypertRemoteService {
 
   /** 全量工作区费用表 */
   private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<MoneyWorkspaceCost[]> {
-    const registry = this.ctx.get('workspaceRegistry') as { list(): Array<{ title?: unknown; sessionIds?: unknown }> } | undefined;
-    if (!registry) return [];
-    let list: Array<{ title?: unknown; sessionIds?: unknown }> = [];
+    const registry = this.ctx.get('workspaceRegistry') as
+      | { list(): Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> }
+      | undefined;
+    if (!registry || typeof registry.list !== 'function') return [];
+    let list: Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> = [];
     try {
       list = registry.list();
     } catch (e) {
@@ -284,6 +419,7 @@ export default class MoneyCostService extends TypertRemoteService {
         }
       }
       workspaces.push({
+        id: typeof w.id === 'string' ? w.id : '',
         title: typeof w.title === 'string' ? w.title : '',
         cost: hasCost ? total : null,
         sessionCount: sessionIds.length,
@@ -293,7 +429,7 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 读取/设置显示币种 */
-  @Remote("config")
+  @Remote('config')
   async config(args: { currency?: string }): Promise<MoneyConfigResult> {
     const value = args && typeof args === 'object' ? args.currency : undefined;
     if (value === 'CNY' || value === 'USD' || value === 'auto') {
@@ -305,14 +441,14 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 侧边栏底部余额 */
-  @Remote("balance")
-  async balance(): Promise<{ balance: MoneyBalanceInfo | null }> {
+  @Remote('balance')
+  async balance(): Promise<MoneyBalanceResult> {
     const balance = await this.cachedBalance();
     return { balance };
   }
 
   /** 单会话费用总览（余额与费用解耦：余额网络请求不阻塞费用计算） */
-  @Remote("overview")
+  @Remote('overview')
   async overview(args: { sessionId?: string }): Promise<MoneyCostOverview | { error: string }> {
     const sessionId = args && typeof args === 'object' && typeof args.sessionId === 'string' ? args.sessionId : null;
     if (!sessionId) return { error: 'missing sessionId' };
@@ -343,7 +479,7 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 全量工作区费用表（侧边栏工作区行注入） */
-  @Remote("workspacesAll")
+  @Remote('workspacesAll')
   async workspacesAll(): Promise<MoneyWorkspacesAll> {
     const balance = await this.cachedBalance();
     const currency = this.resolveCurrency(balance);

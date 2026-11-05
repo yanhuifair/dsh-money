@@ -1,59 +1,84 @@
 # dsh-money
 > DeepSeek Harness 费用追踪插件 —— 实时显示账号余额、当前对话费用与每次回复费用，全部金额以金色（`#f0c11d`）标签（徽章）风格展示，估算费用带 `~` 符号。
 
-![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![dsh](https://img.shields.io/badge/dsh-DeepSeek%20Harness-blueviolet.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)  ![pnpm](https://img.shields.io/badge/pnpm-7.0.0-blue.svg) 
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)  ![dsh](https://img.shields.io/badge/dsh-0.2.x-blueviolet.svg)  ![npm](https://img.shields.io/npm/v/dsh-money.svg)
 
-显示 DeepSeek Harness 账号余额、当前对话费用与每次回复费用
+显示 DeepSeek Harness 账号余额、当前对话费用与每次回复费用：
+
 ![alt text](Snipaste_2026-08-23_03-25-22-1.png)
 
-鼠标悬停能显示详细信息
+鼠标悬停能显示详细信息：
+
 ![alt text](Snipaste_2026-08-21_11-57-19.png)
 
-插件形式加载
+插件形式加载（Plugins 页面可启用/停用）：
+
 ![alt text](Snipaste_2026-08-23_03-22-23-1.png)
 
-设置货币类型
+设置货币类型：
+
 ![alt text](Snipaste_2026-08-21_11-54-51.png)
 
+> 截图取自 1.1.x。1.2.0 起界面位置有调整：余额从「设置按钮下方」移到「设置按钮旁」（`sidebar.footer.action` 槽位），每条回复的费用标签在操作按钮行内。
+
+## 兼容性
+
+| dsh-money | DeepSeek Harness |
+|---|---|
+| **1.2.x** | **0.2.x**（当前适配 `0.2.1-rc.5`，`engines.dsh: ^0.2.1-rc.5`） |
+| ≤ 1.1.9 | 0.1.x |
+
+`1.2.0` 是针对 DSH 0.2.x 的适配版本，主要变化：
+
+- 安装方式改为**标准 bundle**（包内自带 `cordis.patch.yml`），`dsh plugin add` / Plugins 页面安装即挂载，不再需要手写 profile 补丁行
+- 余额改走 DSH 0.2.x 的 `ctx.deepseekAccount`（登录账号）服务，API Key 作为兜底；不再依赖已移除的 `settings.get()` / `shell.run()`
+- 计价表更新为 **2026-11 官方价目**，模型名改为 `deepseek-flash`（旧名 `deepseek-v4-flash` 仍按 Flash 计费）
+- 高峰时段改为**北京时间周一至周五** 9:00-12:00、14:00-18:00（周末为低谷）
+- 侧边栏余额改用官方 `sidebar.footer.action` 槽位；工作区徽章改用 0.2.x 的 `data-row-key` 行标识（0.2.x 已移除 `data-slot` 属性）
+- typert 产物用 0.2.1 生成器重新生成（旧产物会在启动时报 `result codec has no create() factory`）
 
 ## 功能
 
 | 显示项 | 说明 |
 |---|---|
-| **账号剩余金额** | 调用 DeepSeek `GET /user/balance` 接口获取，60 秒缓存自动刷新，显示在侧边栏底部 |
+| **账号剩余金额** | 登录账号优先读取 Platform 余额（充值 + 赠送钱包合计）；未登录时回退到 `DEEPSEEK_API_KEY` 的 `GET /user/balance`。60 秒缓存自动刷新，显示在侧边栏底部（设置按钮旁） |
 | **当前对话费用** | 折叠会话日志中每条 `assistant/message` 的 token 用量，按官方价目表实时计价并求和 |
-| **每次回复费用** | 逐条回复独立计价，以金色标签显示在回复按钮行右侧 |
+| **每次回复费用** | 逐条回复独立计价，以金色标签显示在该条回复的操作按钮行内 |
 | **工作区总费用** | 侧边栏每个工作区行显示其全部会话的费用总和 |
 
 ### 界面
 
-- **侧边栏底部余额**：`余额 [¥ 110.00]`，位于设置按钮下方，金色徽章样式（背景只包裹文字），60 秒自动刷新
+- **侧边栏底部余额**：`余额 [¥ 110.00]`，位于设置按钮旁（`sidebar.footer.action`），金色徽章样式，60 秒自动刷新；侧边栏折叠为图标栏时只显示币种符号
 - **侧边栏工作区行**：每个工作区行右侧显示其总费用（如 `~¥ 8.72`），悬停显示会话数与估算说明
 - **输入框下方统计行**（`conversation.composer.dock`）：`本对话 [~¥ 8.7188]`，金色徽章样式，30 秒自动刷新
-- **每条回复费用标签**（`conversation.chat.assistant-actions`）：紧跟分支按钮右侧（时间戳保持最右），悬停显示模型与 token 明细（输入未命中 / 缓存命中 / 缓存写入 / 输出，全部带 `token` 单位）
+- **每条回复费用标签**（`conversation.chat.assistant-actions`）：位于该条回复操作按钮行内，悬停显示模型与 token 明细（输入未命中 / 缓存命中 / 缓存写入 / 输出，全部带 `token` 单位）
 - **设置页 → General**：可切换显示币种（自动跟随余额 / 人民币 ¥ / 美元 $）
 
 ### 显示约定
 
 - **金色**：所有金钱文字统一金色 `#f0c11d`，圆角徽章（标签）风格
-- **估算符号**：费用基于官方公开价目 × token 用量估算，统一加 `~` 前缀（如 `~¥ 0.0045`）；余额来自 API 为实际值，不加
+- **估算符号**：费用基于官方公开价目 × token 用量估算，统一加 `~` 前缀（如 `~¥ 0.0045`）；余额来自账号/API 为实际值，不加
 - **¥ 空格**：人民币符号 `¥` 与数字之间带空格（如 `¥ 110.00`）；美元 `$` 不带
 - **单位标注**：token 数量统一带单位（`1.2K token`、`328 token`）；悬停明细中的费用行注明 `（元，估算）` / `（美元，估算）`
 
 ### 计价口径
 
-基于 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（**更新日期：2026-08**，峰值价 = 空闲价 × 2）：
+基于 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（**更新日期：2026-11**，高峰价 = 空闲价 × 2）：
 
 | 模型 | 币种 | 缓存命中（空闲） | 未命中（空闲） | 输出（空闲） |
 |---|---|---|---|---|
-| deepseek-v4-flash | ¥ / $ | 0.05 / 0.007 | 1.5 / 0.22 | 4.5 / 0.66 |
+| deepseek-flash | ¥ / $ | 0.02 / 0.003 | 1 / 0.15 | 4 / 0.6 |
 | deepseek-v4-pro | ¥ / $ | 0.15 / 0.022 | 4.5 / 0.66 | 13.5 / 1.98 |
 
 > **价格来源**：[DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)（中文）/ [Pricing 英文页](https://api-docs.deepseek.com/quick_start/pricing)。
 >
-> **更新日期**：2026-08（价格表在 `packages/dsh-money/src/index.ts` 的 `PRICES` 常量中，官方调价时需同步更新并升级版本）。
+> **更新日期**：2026-11（价格表在 `packages/dsh-money/src/index.ts` 的 `PRICES` 常量中，官方调价时需同步更新并升级版本）。
 >
-> 单位：每百万 token。高峰时段 = 北京时间 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00），价格翻倍。
+> **模型别名**：官方说明旧模型名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 仍可调用但按 Flash 价格计费，插件对这两个名字按 `deepseek-flash` 计价；**不在价目表中的模型（例如本地 Ollama 模型）不显示费用**，不会套用 DeepSeek 价格。
+>
+> 单位：每百万 token。高峰时段 = 北京时间**周一至周五** 9:00-12:00、14:00-18:00（即 UTC 01:00-04:00、06:00-10:00），价格翻倍；周末全天为低谷。
+>
+> 中国法定节假日按官方规则也应视为低谷，插件目前只按周末判断——节假日会按高峰计价，略微高估（差异仅影响节假日几天）。
 >
 > 账单口径：未命中输入（含 cache write）× miss 价 + 缓存命中 × hit 价 + 输出 × out 价。
 >
@@ -61,63 +86,53 @@
 
 ### 计算流程
 
-"本对话费用"、"每次回复费用"与"工作区费用"按以下 5 步计算：
+「本对话费用」「每次回复费用」与「工作区费用」按以下 5 步计算：
 
 1. **读取会话日志**：通过 `sessionQuery.readSession(sessionId)` 读取会话事件，只取 `assistant/message` 事件（每个事件 = 一次模型回复，含该次调用的 token 用量；工具调用、重试不会重复计数）
 2. **提取 token 用量**：每个事件的 `usage` 为互斥计数——`inputTokens`（未命中输入）、`cacheReadTokens`（缓存命中）、`outputTokens`（输出，含思考）
 3. **逐条计价**：`本次费用 = 未命中输入 × miss价 + 缓存命中 × hit价 + 输出 × out价`（每百万 token，÷ 1,000,000）
-4. **峰谷判定**：按该回复的时间戳判断——高峰时段（北京 9:00-12:00、14:00-18:00）三档价格全部 × 2
+4. **峰谷判定**：按该回复的时间戳判断——北京时间周一至周五 9:00-12:00、14:00-18:00 三档价格全部 × 2
 5. **求和**：会话内所有回复费用相加 = 本对话费用；同一工作区内所有会话费用相加 = 工作区总费用；单条即每次回复费用
 
-**计算示例**（deepseek-v4-flash 空闲时段，CNY）：
+**计算示例**（deepseek-flash 空闲时段，CNY）：
 
 ```
 usage: input 736 / cacheRead 492,928 / output 816
-费用 = 736×¥1.5/M + 492,928×¥0.05/M + 816×¥4.5/M
-     = ¥0.0294224（≈ ~¥ 0.0294）
+费用 = 736×¥1/M + 492,928×¥0.02/M + 816×¥4/M
+     = ¥0.01385856（≈ ~¥ 0.0139）
 ```
 
-**余额**：来自 `GET /user/balance` 接口，是**实际值**（不加 `~`）；费用为估算值（带 `~`）。
+**余额**：登录账号由 DSH 账号服务返回（充值 + 赠送钱包合计，实际值）；API Key 模式来自 `GET /user/balance`（实际值）。均不加 `~`；费用为估算值（带 `~`）。
 
 ## 安装
 
-> **说明**：本插件是标准 DSH 静态插件（host 半段为 `TypertRemoteService` + `@Remote`，client 半段为 `__ModuleLoader__` bundle）。`npm i dsh-money` 安装后，在 profile 的 `cordis.patch.yml` 挂载一行、重启 DSH 即生效，**重启不丢失、不依赖任何技能或动态定义**。当前版本 **1.1.6**。
+> **说明**：`1.2.0` 起本包是标准 DSH bundle（`package.json` 声明 `dsh.bundle.patch`，包内 `cordis.patch.yml` 插入 `money` 行）。安装即挂载，**不需要**再手写 profile 的 `cordis.patch.yml`。
 
 ### 前置条件
 
-- 已安装并运行 DSH（DeepSeek Harness）Web 端
-- DeepSeek API Key 已配置（见下文「配置」；未配置则余额显示 `—`，费用仍正常计算）
+- DeepSeek Harness **0.2.x**（Desktop 或 Web 均可）
+- 已登录 DeepSeek 账号，或已配置 `DEEPSEEK_API_KEY`（否则余额显示 `—`，费用仍正常计算）
 
-### 第一步：安装 npm 包
-
-**方式 A（推荐）：DSH 官方插件命令**（需先安装 pnpm，见下方提示）
+### 方式 A：官方插件命令 / Plugins 页面（推荐）
 
 ```bash
-dsh plugin --profile web add dsh-money
+dsh plugin --profile <profile> add dsh-money
 ```
 
-> 该命令在 web profile 目录内执行 `pnpm add dsh-money`，自动完成安装并写入 profile 依赖。`--profile` 换成你的 profile 名（Web 端默认 `web`）。
->
-> ⚠️ **命令名冲突提示**：若执行 `dsh plugin --profile ...` 报 `unrecognized option '--profile'`，说明系统 PATH 中的 `dsh` 不是 DeepSeek Harness 的 `dsh`（macOS 上可能是 Homebrew 的 GNU Distributed Shell 等同名程序）。解决：
-> 1. 用你平时启动 DSH 的那个 `dsh` 命令执行（它才是 DeepSeek Harness 的）
-> 2. 或直接改用下方「方式 B」在 profile 目录用 npm 安装，不依赖 `dsh` 命令
+- Web 端 profile 通常是 `web`；**Desktop 的 profile 由应用自己管理**，请用应用内 **Plugins 页面**安装（侧边栏「插件」→ 添加 → 输入 `dsh-money`）
+- 安装后 bundle 自动进入 `dsh.profile.bundles` 并被启用；刷新页面即可看到徽章
+- 升级：`dsh plugin --profile <profile> update dsh-money`（或 Plugins 页面更新），然后重启 DSH
 
-**方式 B：在 profile 目录手动安装**
+> ⚠️ **从 1.1.x 升级**：请先删除 profile 的 `cordis.patch.yml` 里手写的 `- id: money` 挂载行，否则它和包内 bundle 补丁会重复插入同一行。
+
+### 方式 B：手动安装（不用插件管理器）
 
 ```bash
-cd ~/.dsh/profiles/web
+cd ~/.dsh/profiles/<profile>
 npm i dsh-money          # 或 pnpm add dsh-money
 ```
 
-两种方式等价，装到 profile 的 `node_modules` 后 DSH 即可解析。若你的 `~/.dsh/profiles/web/node_modules` 目前是空的（依赖实际由 `~/.dsh/profiles/node_modules` 提供），安装前先确认该目录存在（`mkdir -p node_modules` 即可，DSH 重启时会自动维护依赖链接）。
-
-> **pnpm 安装**：`dsh plugin` 与 DSH profile 依赖管理使用 pnpm。安装 pnpm：`npm i -g pnpm`（或 `corepack enable pnpm`）。若不想装 pnpm，用「方式 B」的 `npm i` 亦可。
->
-> 如果不知道 profile 目录，执行 `echo $DSH_HOME`（默认 `~/.dsh`），profile 即 `$DSH_HOME/profiles/<名字>/`（Web 端通常是 `web`）。
-
-### 第二步：挂载到 profile
-
-编辑 profile 目录下的 `cordis.patch.yml`（如 `~/.dsh/profiles/web/cordis.patch.yml`），在顶层数组中追加：
+然后在同一目录的 `cordis.patch.yml` 顶层数组追加一行：
 
 ```yaml
 - insert:
@@ -125,20 +140,14 @@ npm i dsh-money          # 或 pnpm add dsh-money
       name: 'dsh-money'
 ```
 
-> 若文件原本是空数组 `[]`，直接替换为上面内容即可。`id` 可随意（唯一即可）；`name` 必须是 `dsh-money`。
-
-### 第三步：重启 DSH
-
-重启 DSH（关闭进程后重新启动，或触发 profile 重载）。重启后刷新浏览器页面，插件即生效。
+重启 DSH 并刷新页面。
 
 ### 验证安装成功
 
-重启后应看到：
-
-- 左侧边栏**最底部（设置按钮下方）**：金色 `余额 ¥ xx.xx` 徽章
-- 侧边栏**每个工作区行**右侧：该工作区总费用（如 `~¥ 8.72`）
-- 对话框**输入框下方**：`本对话 ~¥ xx.xx`
-- 每条 AI 回复的操作按钮行**右侧（分支按钮旁）**：该条回复费用
+- 侧边栏底部、设置按钮旁出现金色余额徽章
+- 侧边栏每个工作区行右侧出现总费用徽章
+- 输入框下方出现 `本对话 ~¥ xx.xx`
+- 每条 AI 回复的操作按钮行内出现该条费用
 
 任一项出现即安装成功。若全无显示，见「故障排查」。
 
@@ -148,7 +157,7 @@ npm i dsh-money          # 或 pnpm add dsh-money
 git clone https://github.com/yanhuifair/dsh-money.git
 cd dsh-money
 npm install
-npm run build            # 生成 lib/（typert 产物 + client bundle）
+npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + host 编译 + client bundle）
 ```
 
 ## 使用
@@ -157,16 +166,16 @@ npm run build            # 生成 lib/（typert 产物 + client bundle）
 
 | 位置 | 内容 | 刷新 |
 |---|---|---|
-| 侧边栏底部 | 账号余额（实际值，金色徽章） | 60 秒自动 |
-| 侧边栏工作区行 | 工作区全部会话费用总和（估算，`~`） | 会话变化时 |
+| 侧边栏底部（设置按钮旁） | 账号余额（实际值，金色徽章） | 60 秒自动 |
+| 侧边栏工作区行 | 工作区全部会话费用总和（估算，`~`） | 60 秒自动 + DOM 变化时 |
 | 输入框下方 | 当前对话累计费用（估算，`~`） | 30 秒自动 |
-| 每条回复旁 | 该次回复费用（估算，`~`），紧跟分支按钮右侧 | 新回复时 |
+| 每条回复操作按钮行 | 该次回复费用（估算，`~`） | 新回复时 |
 
 ### 查看明细
 
 - **悬停每条回复的费用标签**：显示该次回复的模型名，以及输入（未命中 / 缓存命中 / 缓存写入）、输出 token 用量（带 `token` 单位）与费用（`元/美元，估算`）
 - **悬停侧边栏工作区费用徽章**：显示工作区名、总费用（估算）与会话数
-- **悬停侧边栏余额**：提示「账号剩余金额（自动刷新）」
+- **悬停侧边栏余额**：提示「账号剩余金额（自动刷新）」，API Key 模式下额外标明来源
 
 ### 切换显示币种
 
@@ -177,11 +186,6 @@ npm run build            # 生成 lib/（typert 产物 + client bundle）
 
 > ⚠️ 币种设置保存在 DSH host 进程内（进程级记忆），重启 DSH 后恢复为“自动”。
 
-### 费用含义
-
-- 余额来自 DeepSeek `GET /user/balance` 接口，是**实际值**（不加 `~`）
-- 费用基于官方公开价目 × token 用量**估算**（带 `~`），不代表最终账单；计价口径与算法见上文「计价口径」「计算流程」
-
 ## 更新
 
 ```bash
@@ -190,44 +194,39 @@ dsh plugin --profile web update dsh-money
 
 # 或手动
 cd ~/.dsh/profiles/web
-npm update dsh-money    # 或 pnpm update dsh-money
+npm update dsh-money
 ```
 
-然后**重启 DSH**（host 进程内的插件代码才会换新）。`cordis.patch.yml` 的挂载行无需改动。
+然后**重启 DSH**（host 进程内的插件代码才会换新）。bundle 补丁随包更新，profile 无需改动。
 
 > **pnpm 供应链策略提示**：pnpm 默认启用 `minimumReleaseAge`（新版本发布后短时间内不安装，防供应链投毒）。若 `dsh plugin update` / `pnpm update` 提示「Already up to date」而 npm 上已有更新版本，属正常——等发布期过后再更新，或临时用 `npm update dsh-money` 绕过。
->
-> 发布节奏见 [npm 页面](https://www.npmjs.com/package/dsh-money)；`dsh-money` 包内有完整的 `lib/` 构建产物（host 半段、client bundle、typert 清单），`npm update` 后无需额外构建。
 
 ## 卸载
 
-1. 删除 profile 的 `cordis.patch.yml` 中的 `- id: money` 挂载行（或整段 insert）
+1. Plugins 页面关闭并移除 `dsh-money`（或 `dsh plugin --profile <profile> remove dsh-money`）
 2. 重启 DSH
-3. （可选）移除依赖：`dsh plugin --profile web remove dsh-money`（或 `cd ~/.dsh/profiles/web && npm remove dsh-money`）
+3. 手动安装的用户：删除 `cordis.patch.yml` 中的 `- id: money` 行后重启
 
 ## 故障排查
 
 | 现象 | 处理 |
 |---|---|
-| 页面无任何费用显示 | ① 确认已用 `dsh plugin --profile web add dsh-money`（或 profile 目录 `npm i dsh-money`）安装；② 确认 `cordis.patch.yml` 挂载行拼写正确（`name: 'dsh-money'`）；③ 确认已重启 DSH 并刷新页面 |
-| 执行 `dsh plugin --profile ...` 报 `unrecognized option '--profile'` | 系统 PATH 中的 `dsh` 不是 DeepSeek Harness 的（可能是同名其他程序）。用你启动 DSH 的那个 `dsh` 执行，或改用「方式 B」在 profile 目录用 npm 安装，见「安装 → 方式 A」提示 |
-| 重启后找不到 dsh-money（启动报错） | 包未装入 profile 的 `node_modules`——重新在 profile 目录执行安装命令；不要用仓库内手动 symlink 替代 |
-| 余额显示 `—` | DeepSeek API Key 未配置或不可用，检查「配置」；费用计算不受影响 |
-| 费用全为 0 / 无 `~` 值 | 会话尚无 `assistant/message` 事件（新会话无回复），发一条消息后自动出现 |
-| 币种不对 | 设置页 → General → 费用显示货币；重启后恢复“自动”为正常行为 |
-| 更新后没变化 | 重启 DSH 了吗？host 进程内的代码需要重启才换新 |
-| 启动报错 `result codec is not backed by a zod v4 schema` | 本地开发时 zod 版本必须为 **v4**（typert 生成器/loader 依赖 zod v4 的 `_zod` 标记）。确认根目录与 `packages/dsh-money/package.json` 均为 `"zod": "^4.x"`，然后 `npm install && npm run build` 后重启 DSH |
-| web boot 报 `dsh-money: pending (waiting for service: remote.moneyCost)` | 旧版 client bundle 未挂载 `moneyCost` 远端命名空间（`remote.<ns>` 必须由插件显式 `ctx.remote.$mount(TYPERT_REMOTE)` 才会创建）。升级到 **≥1.1.3**（构建走 esbuild 打包 client，自动挂载）；若仍复现，确认 profile 里装的是新包并重启 |
-| 启动报 `cannot get property "remote.moneyCost" without inject` | client 侧 `ctx.remote.moneyCost` 属性访问依赖该命名空间被 inject 绑定到当前 fiber 的 store（cordis 机制）。**≥1.1.4** 已修复：`$mount` 后经 `ctx.inject(['remote.moneyCost'], …)` 动态注入再启动 UI。升级并重启 |
-| 侧栏余额/工作区徽章不显示（dock 本对话与回复标签正常） | `workspacesAll`/`balance` 是无参 remote 端点，client 传了空对象 `{}` 会报 `expected 0 argument(s), got 1`。**≥1.1.5** 已修复。升级并重启 |
-| 余额标签背景占满整行宽度 | 余额行作为 flex 容器子项被默认 `align-items: stretch` 拉满。**≥1.1.6** 已修复（`align-self: flex-start`）。升级并重启 |
+| 安装被拒：`Plugin dsh-money@1.1.9 is incompatible with dsh 0.2.1-rc.5: requirements ...` | 装的是 1.1.x 旧版（peer 依赖指向 0.1.x 且含已移除的 `dsh-client-runtime`）。升级到 **≥1.2.0** |
+| 启动告警：`typert-loader: dsh-money invocation ... result codec has no create() factory` | 1.1.x 的 typert 产物不兼容 0.2.x。升级到 **≥1.2.0** 并重启 |
+| 页面无任何费用显示 | ① 确认 bundle 已启用（Plugins 页面）；② 确认已刷新页面（client bundle 需要重新加载）；③ 手动安装时确认 `cordis.patch.yml` 行拼写为 `name: 'dsh-money'` |
+| 余额显示 `—` | 未登录账号且未配置 `DEEPSEEK_API_KEY`；或网络/代理不可达。费用计算不受影响 |
+| 费用全为 0 / 无 `~` 值 | ① 会话尚无 `assistant/message` 事件；② 当前模型不在价目表（如本地 Ollama 模型）——插件不套用 DeepSeek 价格，属预期行为 |
+| 工作区行没有费用徽章 | 工作区还没有已计费的会话；或侧边栏处于搜索/归档过滤状态 |
+| 币种重启后变回“自动” | 币种是进程内设置，属预期行为 |
+| 升级到 1.2.0 后启动报重复 id / 服务重复 | profile 的 `cordis.patch.yml` 里还有 1.1.x 时代手写的 `- id: money` 行，删掉即可（包内 bundle 已自带挂载） |
 
 ## 配置
 
-插件自动读取已有 DeepSeek 配置，无需单独配置：
+插件自动读取 DSH 已有配置，无需单独配置：
 
-- **API Key**：`ctx.credentials` 服务（默认引用 `DEEPSEEK_API_KEY`），也可通过设置 `llm-deepseek.apiKeyEnv` 覆盖
-- **Base URL**：默认 `https://api.deepseek.com`，可通过设置 `llm-deepseek.baseURL` 覆盖（兼容网关/代理）
+- **余额来源**：优先 `ctx.deepseekAccount`（DSH 登录账号）；未登录时回退 API Key
+- **API Key**：`ctx.credentials` 解析 DeepSeek provider 声明的环境变量（默认 `DEEPSEEK_API_KEY`）
+- **Base URL**：DeepSeek provider 的 `defaultBaseURL`，可被对应 settings 命名空间的 `baseURL` 覆盖（兼容网关/代理）
 
 **显示币种**：设置页 → General → “费用显示货币”（见「使用」章节）。
 
@@ -237,7 +236,7 @@ npm update dsh-money    # 或 pnpm update dsh-money
 git clone https://github.com/yanhuifair/dsh-money.git
 cd dsh-money
 npm install
-npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + client bundle）
+npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + host 编译 + client bundle）
 ```
 
 插件源码结构（monorepo）：
@@ -249,10 +248,14 @@ packages/dsh-money/
 │   ├── types.ts        # Remote 边界类型（公开导出）
 │   ├── client.ts       # Client 半段类型入口
 │   ├── client.entry.js # Client 打包入口（esbuild 聚合 TYPERT_REMOTE + UI）
-│   └── client.static.cjs # Client UI 实现（slot 注册 + 侧栏 DOM 注入）
+│   └── client.static.cjs # Client UI 实现（slot 注册 + 工作区行 DOM 注入）
+├── cordis.patch.yml    # bundle 补丁（插入 money 行）
 ├── lib/                # 构建产物（typert.host.js / typert.remote-client.js / client.js / index.js）
-└── package.json        # dsh.client 声明 + ./typert ./remote 导出
+└── package.json        # dsh.bundle / dsh.client 声明 + ./typert ./remote 导出
+packages/typert-protocol/  # @deepseek-ai/dsh-typert-protocol 的类型副本（仅供代码生成器识别 Remote 元数据）
 ```
+
+构建要求：`zod` 必须为 **v4**（typert 生成器/loader 依赖 zod v4 的 `_zod` 标记），`@deepseek-ai/dsh-*` dev 依赖与目标 DSH 版本一致（当前 `0.2.1-rc.5`）。升级 DSH 后需同步 `packages/typert-protocol/`（见其 README）。
 
 ## 许可证
 
