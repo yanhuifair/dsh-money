@@ -19,7 +19,7 @@
 
 ![alt text](Snipaste_2026-08-21_11-54-51.png)
 
-> 截图取自 1.1.x。1.2.0 起界面位置有调整：余额从「设置按钮下方」移到「设置按钮旁」（`sidebar.footer.action` 槽位），每条回复的费用标签在操作按钮行内。
+> 截图取自 1.1.x，界面位置在 1.2.0 起有调整：余额移到「设置按钮旁」（`sidebar.footer.action`），每条回复费用标签在操作按钮行内。1.3.x 又增加了余额右侧的高峰/闲时徽章、输入框下方只保留合计徽章、悬停改为自绘浮层。
 
 ## 兼容性
 
@@ -28,6 +28,8 @@
 | **1.3.x** | **0.2.x**（当前适配 `0.2.1-rc.5`，`engines.dsh: ^0.2.1-rc.5`） |
 | 1.2.x | 0.2.x（基础适配） |
 | ≤ 1.1.9 | 0.1.x |
+
+`1.3.5` 为 npm 包补充 `packages/dsh-money/README.md`（npm 页面此前没有说明），同时修订本文档里过时的界面/悬停描述。
 
 `1.3.4` 精简输入框下方：只保留「本对话」合计徽章，高峰/闲时不再作为独立徽章展示（悬停明细仍给出分项与条数）。
 
@@ -66,7 +68,7 @@
 ### 界面
 
 - **侧边栏底部余额**：`余额 [¥ 110.00]`，位于设置按钮旁（`sidebar.footer.action`），金色徽章样式，60 秒自动刷新；侧边栏折叠为图标栏时只显示币种符号
-- **余额右侧时段徽章**：`高峰`（橙色）或 `闲时`（绿色）；悬停显示判定规则与「下次切换：HH:MM 起为…」，到点自动刷新。侧边栏折叠时不显示
+- **余额右侧时段徽章**：`高峰`（橙色）或 `闲时`（绿色）；悬停显示判定规则、本次时段起点与下次切换的完整日期时间（`MM-DD（周X）HH:MM`），到切换点自动刷新。侧边栏折叠时不显示
 - **侧边栏工作区行**：每个工作区行右侧显示其总费用（如 `~¥ 8.72`），悬停显示会话数与估算说明
 - **输入框下方统计行**（`conversation.composer.dock`）：`本对话 [~¥ 8.7188]`，行内只显示合计；悬停后展开高峰 / 闲时分别合计（含条数），30 秒自动刷新
 - **每条回复费用标签**（`conversation.chat.assistant-actions`）：位于该条回复操作按钮行内，悬停显示模型、计价时段（高峰 ×2 / 闲时）与 token 明细（输入未命中 / 缓存命中 / 缓存写入 / 输出，全部带 `token` 单位）
@@ -109,7 +111,7 @@
 1. **读取会话日志**：通过 `sessionQuery.readSession(sessionId)` 读取会话事件，只取 `assistant/message` 事件（每个事件 = 一次模型回复，含该次调用的 token 用量；工具调用、重试不会重复计数）
 2. **提取 token 用量**：每个事件的 `usage` 为互斥计数——`inputTokens`（未命中输入）、`cacheReadTokens`（缓存命中）、`outputTokens`（输出，含思考）
 3. **逐条计价**：`本次费用 = 未命中输入 × miss价 + 缓存命中 × hit价 + 输出 × out价`（每百万 token，÷ 1,000,000）
-4. **峰谷判定**：按该回复的时间戳判断——北京时间周一至周五 9:00-12:00、14:00-18:00 三档价格全部 × 2
+4. **峰谷判定**：按该回复的时间戳判断——北京时间周一至周五 9:00-12:00、14:00-18:00（中国法定节假日除外）三档价格全部 × 2，其余时段为基准价
 5. **求和**：会话内所有回复费用相加 = 本对话费用；同一工作区内所有会话费用相加 = 工作区总费用；单条即每次回复费用
 
 **计算示例**（deepseek-flash 空闲时段，CNY）：
@@ -150,6 +152,8 @@ cd ~/.dsh/profiles/<profile>
 npm i dsh-money          # 或 pnpm add dsh-money
 ```
 
+> 方式 A 与方式 B **二选一**：bundle 方式（A）已自动插入 `money` 行，再手写一行会重复。
+
 然后在同一目录的 `cordis.patch.yml` 顶层数组追加一行：
 
 ```yaml
@@ -166,6 +170,7 @@ npm i dsh-money          # 或 pnpm add dsh-money
 - 侧边栏每个工作区行右侧出现总费用徽章
 - 输入框下方出现 `本对话 ~¥ xx.xx`
 - 每条 AI 回复的操作按钮行内出现该条费用
+- 鼠标停在这些徽章上能弹出多行明细（自绘浮层，不依赖原生 title）
 
 任一项出现即安装成功。若全无显示，见「故障排查」。
 
@@ -196,7 +201,6 @@ npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + host
 - **悬停时段徽章**：显示官方判定规则、本次时段起点与下次切换的完整日期时间（`MM-DD（周X）HH:MM`）
 - **悬停「本对话」金额**：显示总额、高峰合计（N 条）、闲时合计（N 条）
 - **悬停工作区徽章**：显示工作区总额、高峰合计、闲时合计与会话数
-- **悬停侧边栏工作区费用徽章**：显示工作区名、总费用（估算）与会话数
 - **悬停侧边栏余额**：提示「账号剩余金额（自动刷新）」，API Key 模式下额外标明来源
 
 ### 切换显示币种
@@ -211,7 +215,7 @@ npm run build            # 生成 packages/dsh-money/lib/（typert 产物 + host
 ## 更新
 
 ```bash
-# 官方命令（推荐）
+# 官方命令（推荐；Desktop 的 profile 由应用管理，请用 Plugins 页面更新）
 dsh plugin --profile web update dsh-money
 
 # 或手动
@@ -280,7 +284,7 @@ packages/dsh-money/
 packages/typert-protocol/  # @deepseek-ai/dsh-typert-protocol 的类型副本（仅供代码生成器识别 Remote 元数据）
 ```
 
-时段判定与放假安排：`packages/dsh-money/src/index.ts` 的 `CN_HOLIDAY_RANGES`（每年更新）与 `isPeak()` / `nextPeriodChange()`；客户端只展示 host 返回的 `period`，不重复实现规则。
+时段判定与放假安排：`packages/dsh-money/src/index.ts` 的 `CN_HOLIDAY_RANGES`（每年更新）与 `isPeak()` / `periodStart()` / `nextPeriodChange()`；客户端只展示 host 返回的 `period`（`peak` / `since` / `nextChangeAt`），不重复实现规则。
 
 构建要求：`zod` 必须为 **v4**（typert 生成器/loader 依赖 zod v4 的 `_zod` 标记），`@deepseek-ai/dsh-*` dev 依赖与目标 DSH 版本一致（当前 `0.2.1-rc.5`）。升级 DSH 后需同步 `packages/typert-protocol/`（见其 README）。
 
