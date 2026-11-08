@@ -225,7 +225,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.3.3',
+        version: '1.3.4',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });

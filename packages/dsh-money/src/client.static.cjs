@@ -217,12 +217,6 @@ function apply(ctx) {
     return MM + '-' + DD + '（' + WEEKDAYS[d.getDay()] + '）' + hh + ':' + mm;
   }
 
-  /** 时段区间：MM-DD（周X）HH:MM → MM-DD（周X）HH:MM */
-  function periodRange(period) {
-    if (!period) return '—';
-    return fmtDateTime(period.since) + ' → ' + fmtDateTime(period.nextChangeAt);
-  }
-
   function periodTooltip(period) {
     if (!period) return '计费时段未知';
     const since = fmtDateTime(period.since);
@@ -299,25 +293,6 @@ function apply(ctx) {
     }, [sessionId]);
     const o = overview || {};
     const currency = o.currency || 'CNY';
-    const parts = [];
-    if (o.peakCost != null && o.peakCost > 0) {
-      parts.push(React.createElement('span', {
-        key: 'peak',
-        'aria-label': '高峰时段累计费用（估算）',
-        ...tipProps('高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）的累计费用（估算）'
-          + (o.period ? '\n当前时段：' + periodRange(o.period) : '')),
-        style: periodBadgeStyle(true),
-      }, '高峰 ' + fmtMoney(o.peakCost, currency)));
-    }
-    if (o.offPeakCost != null && o.offPeakCost > 0) {
-      parts.push(React.createElement('span', {
-        key: 'offpeak',
-        'aria-label': '闲时累计费用（估算）',
-        ...tipProps('闲时（含周末与法定节假日）的累计费用（估算）'
-          + (o.period ? '\n当前时段：' + periodRange(o.period) : '')),
-        style: periodBadgeStyle(false),
-      }, '闲时 ' + fmtMoney(o.offPeakCost, currency)));
-    }
     return React.createElement('div', {
       style: { display: 'flex', gap: '10px', alignItems: 'center', fontSize: '11px', opacity: 0.85, padding: '2px 0', whiteSpace: 'nowrap' },
     },
@@ -330,7 +305,6 @@ function apply(ctx) {
         '本对话 ',
         React.createElement('span', { style: badgeStyle }, fmtMoney(o.conversationCost, currency)),
       ),
-      parts,
     );
   }
 
