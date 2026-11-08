@@ -204,20 +204,32 @@ function apply(ctx) {
     return period && period.peak ? '高峰' : '闲时';
   }
 
-  function fmtClock(ms) {
+  const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+  /** 详细时间：MM-DD（周X）HH:MM */
+  function fmtDateTime(ms) {
     if (!Number.isFinite(ms)) return '—';
     const d = new Date(ms);
+    const MM = String(d.getMonth() + 1).padStart(2, '0');
+    const DD = String(d.getDate()).padStart(2, '0');
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
-    return hh + ':' + mm;
+    return MM + '-' + DD + '（' + WEEKDAYS[d.getDay()] + '）' + hh + ':' + mm;
+  }
+
+  /** 时段区间：MM-DD（周X）HH:MM → MM-DD（周X）HH:MM */
+  function periodRange(period) {
+    if (!period) return '—';
+    return fmtDateTime(period.since) + ' → ' + fmtDateTime(period.nextChangeAt);
   }
 
   function periodTooltip(period) {
     if (!period) return '计费时段未知';
-    const next = fmtClock(period.nextChangeAt);
+    const since = fmtDateTime(period.since);
+    const next = fmtDateTime(period.nextChangeAt);
     return period.peak
-      ? '当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）\n三档单价 ×2\n下次切换：' + next + ' 起为闲时'
-      : '当前为闲时（含周末与中国法定节假日）\n三档单价为基准价\n下次切换：' + next + ' 起为高峰';
+      ? '当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）\n三档单价 ×2\n本次高峰：' + since + ' 起\n下次切换：' + next + ' 起为闲时'
+      : '当前为闲时（含周末与中国法定节假日）\n三档单价为基准价\n本次闲时：' + since + ' 起\n下次切换：' + next + ' 起为高峰';
   }
 
   function moneySymbol(currency) {
@@ -292,7 +304,8 @@ function apply(ctx) {
       parts.push(React.createElement('span', {
         key: 'peak',
         'aria-label': '高峰时段累计费用（估算）',
-        ...tipProps('高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）的累计费用（估算）'),
+        ...tipProps('高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）的累计费用（估算）'
+          + (o.period ? '\n当前时段：' + periodRange(o.period) : '')),
         style: periodBadgeStyle(true),
       }, '高峰 ' + fmtMoney(o.peakCost, currency)));
     }
@@ -300,7 +313,8 @@ function apply(ctx) {
       parts.push(React.createElement('span', {
         key: 'offpeak',
         'aria-label': '闲时累计费用（估算）',
-        ...tipProps('闲时（含周末与法定节假日）的累计费用（估算）'),
+        ...tipProps('闲时（含周末与法定节假日）的累计费用（估算）'
+          + (o.period ? '\n当前时段：' + periodRange(o.period) : '')),
         style: periodBadgeStyle(false),
       }, '闲时 ' + fmtMoney(o.offPeakCost, currency)));
     }

@@ -16,6 +16,8 @@ export interface MoneyBalanceInfo {
 export interface MoneyPeriod {
   /** 当前是否高峰时段（三档单价 ×2） */
   peak: boolean;
+  /** 当前时段开始的时间戳（毫秒）：最近一次时段切换点 */
+  since: number;
   /** 下一次时段切换的时间戳（毫秒），客户端据此安排刷新 */
   nextChangeAt: number;
 }

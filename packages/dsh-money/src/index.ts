@@ -111,9 +111,27 @@ function nextPeriodChange(ms: number): number {
   return ms + DAY;
 }
 
-/** 当前时段快照（高峰/闲时 + 下次切换时间） */
-function currentPeriod(ms: number = Date.now()): { peak: boolean; nextChangeAt: number } {
-  return { peak: isPeak(ms), nextChangeAt: nextPeriodChange(ms) };
+/**
+ * 当前时段开始的时间戳：向前找最近一次状态翻转的北京时间边界（0/9/12/14/18 点）。
+ * 判定边界时比较该点与前 1ms 的状态，因此 9:00 开始的高峰能正确识别为 9:00 起。
+ */
+function periodStart(ms: number): number {
+  const DAY = 24 * 60 * 60 * 1000;
+  const dayStart = Math.floor((ms + BEIJING_OFFSET_MS) / DAY) * DAY - BEIJING_OFFSET_MS;
+  for (let offset = 0; offset <= 8; offset++) {
+    const base = dayStart - offset * DAY;
+    for (const hour of [18, 14, 12, 9, 0]) {
+      const at = base + hour * 60 * 60 * 1000;
+      if (at > ms) continue;
+      if (isPeak(at) !== isPeak(at - 1)) return at;
+    }
+  }
+  return ms - DAY;
+}
+
+/** 当前时段快照（高峰/闲时 + 本段起点 + 下次切换时间） */
+function currentPeriod(ms: number = Date.now()): { peak: boolean; since: number; nextChangeAt: number } {
+  return { peak: isPeak(ms), since: periodStart(ms), nextChangeAt: nextPeriodChange(ms) };
 }
 
 function modelOf(model: string): string {
@@ -207,7 +225,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.3.2',
+        version: '1.3.3',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
