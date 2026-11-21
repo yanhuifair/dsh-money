@@ -128,31 +128,63 @@ function apply(ctx) {
     if (tipEl || typeof document === 'undefined') return tipEl;
     tipEl = document.createElement('div');
     tipEl.setAttribute('data-dsh-money-tip', '');
+    // 与原生「点击弹出窗」（上下文/用量详情面板）同款：
+    // menu 表面 + 毛玻璃 + radius-lg + elevation-prominent 描边阴影，正文 12px/18px label-secondary
     tipEl.style.cssText = [
-      // 与原生 Tooltip 气泡一致：dsh-client-ui-theme 的 --dsw-alias-tooltip-*，
-      // 无描边、无阴影、radius-sm，淡入 .15s（prefers-reduced-motion 时禁用）
       'position:fixed',
       'z-index:1100',
-      'width:max-content',
       'box-sizing:border-box',
-      'max-width:min(50vw,calc(100vw - 24px))',
+      'width:max-content',
+      'min-width:min(300px,calc(100vw - 24px))',
+      'max-width:min(440px,calc(100vw - 24px))',
       'max-height:calc(100vh - 24px)',
-      'overflow:auto',
-      'padding:3px 7px',
-      'border-radius:var(--dsw-radius-sm,8px)',
-      'background:var(--dsw-alias-tooltip-bg,var(--dsw-static-neutral-bluish-850,rgba(37,42,52,0.97)))',
-      'color:var(--dsw-alias-tooltip-label,var(--dsw-static-neutral-bluish-00,#fff))',
-      'font-size:13px',
-      'line-height:20px',
-      'white-space:pre-line',
-      'overflow-wrap:break-word',
+      'overflow:hidden auto',
+      'padding:16px',
+      'border:0',
+      'border-radius:var(--dsw-radius-lg,16px)',
+      'background:var(--dsw-specific-menu,var(--dsw-alias-bg-overlay,rgba(37,42,52,0.9)))',
+      'backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%))',
+      '-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%))',
+      '--dsw-elevation-stroke-color:var(--dsw-alias-border-l1,rgba(128,128,128,0.2))',
+      'box-shadow:var(--dsw-elevation-prominent,0 0 0 .5px var(--dsw-alias-border-l1,rgba(128,128,128,0.2)),0 3px 8px rgba(0,0,0,0.04),0 0 20px rgba(0,0,0,0.05))',
+      'color:var(--dsw-alias-label-secondary,#a0a0a8)',
+      'font-size:12px',
+      'line-height:18px',
+      'font-variant-numeric:tabular-nums',
       'user-select:text',
       '-webkit-app-region:no-drag',
-      'opacity:0',
-      'transition:opacity 150ms var(--ds-ease-in-out,ease)',
+      'display:none',
     ].join(';');
     try { document.body.appendChild(tipEl); } catch (e) { tipEl = null; }
     return tipEl;
+  }
+
+  // 文案首行为标题（label-primary / 500），其余行按「标签: 值」渲染为
+  // 原生详情网格（label-tertiary，两列，列间距 16px），与用量弹窗一致
+  function renderTip(text) {
+    const el = tipEl;
+    if (!el) return;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.__dshMoneyText = text;
+    const lines = String(text).split('\n');
+    const title = document.createElement('div');
+    title.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);font-weight:500;margin-bottom:8px;display:flex;justify-content:space-between;gap:16px;';
+    title.textContent = lines[0];
+    el.appendChild(title);
+    if (lines.length < 2) return;
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;color:var(--dsw-alias-label-tertiary,#7a7a85);';
+    for (const line of lines.slice(1)) {
+      const m = line.match(/^(.{1,24}?)([:：])\s*([\s\S]*)$/);
+      const dt = document.createElement('div');
+      const dd = document.createElement('div');
+      dd.style.cssText = 'overflow-wrap:anywhere;white-space:pre-line;';
+      if (m) { dt.textContent = m[1]; dd.textContent = m[3]; }
+      else { dt.textContent = ''; dd.textContent = line; }
+      grid.appendChild(dt);
+      grid.appendChild(dd);
+    }
+    el.appendChild(grid);
   }
 
   function isAttached(el) {
@@ -180,26 +212,21 @@ function apply(ctx) {
     if (!text || !anchor) { hideTip(); return; }
     const el = ensureTip();
     if (!el) return;
-    if (text !== tipText || tipAnchor !== anchor) { el.textContent = text; tipText = text; }
+    if (text !== tipText || tipAnchor !== anchor) { renderTip(text); tipText = text; }
     tipAnchor = anchor;
-    applyMotionPreference();
-    el.style.opacity = '1';
+    el.style.display = 'block';
     placeTip();
   }
 
   function hideTip() {
     tipAnchor = null;
     if (!tipEl) return;
-    tipEl.style.opacity = '0';
+    elHide();
   }
 
-  // 原生同样在 prefers-reduced-motion 下禁用动画；这里让淡入即时完成
-  function applyMotionPreference() {
-    if (!tipEl || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    try {
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) tipEl.style.transition = 'none';
-      else tipEl.style.transition = 'opacity 150ms var(--ds-ease-in-out,ease)';
-    } catch (e) {}
+  function elHide() {
+    if (!tipEl) return;
+    tipEl.style.display = 'none';
   }
 
   function toggleTip(text, anchor) {
