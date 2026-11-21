@@ -159,14 +159,71 @@ function apply(ctx) {
     return tipEl;
   }
 
-  // 文案首行为标题（label-primary / 500），其余行按「标签: 值」渲染为
-  // 原生详情网格（label-tertiary，两列，列间距 16px），与用量弹窗一致
-  function renderTip(text) {
+  /** 图表数值：0 显示 0；≥1 一位小数；<1 两位小数（去尾零） */
+  function fmtChartValue(cost) {
+    if (!cost) return '0';
+    const v = cost >= 1 ? cost.toFixed(1) : cost.toFixed(2);
+    return v.replace(/\.?0+$/, '');
+  }
+
+  /** 近 7 天柱状图：金色柱、底部细基线、上数值下日期（原生弹窗内嵌图表风格） */
+  function renderChart(el, chart) {
+    const cur = chart.currency || 'CNY';
+    const head = document.createElement('div');
+    head.setAttribute('data-dsh-money-chart', '');
+    head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-top:10px;';
+    const hl = document.createElement('span');
+    hl.style.cssText = 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
+    hl.textContent = '最近 7 天（估算）';
+    const hv = document.createElement('span');
+    hv.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);font-variant-numeric:tabular-nums;';
+    hv.textContent = fmtMoney(chart.total == null ? 0 : chart.total, cur);
+    head.appendChild(hl);
+    head.appendChild(hv);
+    el.appendChild(head);
+    const days = (Array.isArray(chart.days) ? chart.days : []).slice(0, 7);
+    if (!days.length) return;
+    let max = 0;
+    for (const d of days) { if (d && typeof d.cost === 'number' && d.cost > max) max = d.cost; }
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-dsh-money-bars', '');
+    wrap.style.cssText = 'display:flex;align-items:flex-end;gap:6px;margin-top:6px;';
+    for (const d of days) {
+      const cost = d && typeof d.cost === 'number' ? d.cost : 0;
+      const col = document.createElement('div');
+      col.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0;';
+      const v = document.createElement('div');
+      v.style.cssText = 'color:var(--dsw-alias-label-secondary,#a0a0a8);font-size:10px;line-height:12px;font-variant-numeric:tabular-nums;white-space:nowrap;';
+      v.textContent = fmtChartValue(cost);
+      const barArea = document.createElement('div');
+      barArea.style.cssText = 'display:flex;align-items:flex-end;justify-content:center;height:56px;border-bottom:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,0.25));width:100%;';
+      const bar = document.createElement('div');
+      const h = cost > 0 ? Math.max(3, Math.round((cost / (max || 1)) * 54)) : 2;
+      bar.style.cssText = 'width:16px;border-radius:3px 3px 0 0;background:'
+        + (cost > 0 ? 'rgba(240,193,29,0.9)' : 'rgba(128,128,128,0.25)')
+        + ';height:' + h + 'px;';
+      barArea.appendChild(bar);
+      const day = document.createElement('div');
+      day.style.cssText = 'color:var(--dsw-alias-label-tertiary,#7a7a85);font-size:10px;line-height:12px;font-variant-numeric:tabular-nums;';
+      day.textContent = d && d.date ? d.date : '';
+      col.appendChild(v);
+      col.appendChild(barArea);
+      col.appendChild(day);
+      wrap.appendChild(col);
+    }
+    el.appendChild(wrap);
+  }
+
+  /** 细节内容：字符串（多行文案）或 { lines, chart }；首行为标题（label-primary/500），
+   *  其余按「标签: 值」渲染为原生详情网格；chart 存在时追加近 7 天柱状图 */
+  function renderTip(payload) {
     const el = tipEl;
     if (!el) return;
     while (el.firstChild) el.removeChild(el.firstChild);
-    el.__dshMoneyText = text;
-    const lines = String(text).split('\n');
+    const spec = typeof payload === 'string' ? { lines: String(payload).split('\n') } : (payload || { lines: [] });
+    el.__dshMoneyText = tipKey(payload);
+    const lines = spec.lines || [];
+    if (!lines.length) return;
     // 标题行：左标签右数值（原生「会话统计」弹窗同款，值 tabular-nums）
     const title = document.createElement('div');
     title.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:16px;color:var(--dsw-alias-label-primary,#f5f5f5);font-weight:500;';
@@ -210,6 +267,7 @@ function apply(ctx) {
       }
       el.appendChild(grid);
     }
+    if (spec.chart) renderChart(el, spec.chart);
   }
 
   function isAttached(el) {
@@ -233,11 +291,17 @@ function apply(ctx) {
     el.style.top = top + 'px';
   }
 
+  /** 浮层内容缓存键：字符串直接用，对象序列化（chart 数据小，JSON 足够廉价） */
+  function tipKey(payload) {
+    return typeof payload === 'string' ? payload : JSON.stringify(payload || null);
+  }
+
   function showTip(text, anchor) {
     if (!text || !anchor) { hideTip(); return; }
     const el = ensureTip();
     if (!el) return;
-    if (text !== tipText || tipAnchor !== anchor) { renderTip(text); tipText = text; }
+    const key = tipKey(text);
+    if (key !== tipText || tipAnchor !== anchor) { renderTip(text); tipText = key; }
     tipAnchor = anchor;
     el.style.display = 'block';
     placeTip();
@@ -481,16 +545,15 @@ function apply(ctx) {
     const amount = fmtBalance(balance);
     const tipLines = ['账号剩余金额: ' + amount];
     if (balance && balance.source === 'api-key') tipLines.push('来源: API Key 余额');
+    let tip;
     if (wsDays && wsDays.length) {
       const cur = wsTable && wsTable.currency ? wsTable.currency : 'CNY';
       let week = 0;
       for (const d of wsDays) { if (d && typeof d.cost === 'number') week += d.cost; }
-      tipLines.push('最近 7 天（估算）: ' + fmtMoney(week, cur));
-      for (const d of wsDays) {
-        if (d && typeof d.cost === 'number') tipLines.push(d.date + ': ' + fmtMoney(d.cost, cur));
-      }
+      tip = { lines: tipLines, chart: { total: week, currency: cur, days: wsDays } };
+    } else {
+      tip = tipLines.join('\n');
     }
-    const tip = tipLines.join('\n');
     if (!wide) {
       // 56px 折叠态：只显示币种符号，避免挤压设置按钮
       const sym = balance && balance.currency === 'USD' ? '$' : '¥';
