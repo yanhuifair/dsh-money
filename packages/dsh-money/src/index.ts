@@ -183,10 +183,9 @@ function priceOf(
   return { hit: base.hit * k, miss: base.miss * k, out: base.out * k };
 }
 
-/** 本地/未计价模型的模拟单价：Flash 基准价（闲时价，无高峰翻倍） */
-function simPrice(currency: string): { hit: number; miss: number; out: number } | null {
-  const table = PRICES[currency] || PRICES.CNY;
-  return table['deepseek-flash'] || null;
+/** 本地/未计价模型的模拟单价：与 DeepSeek API 同规则——Flash 档价格 + 同时段高峰 ×2 */
+function simPrice(currency: string, ms: number): { hit: number; miss: number; out: number } | null {
+  return priceOf('deepseek-flash', ms, currency);
 }
 
 /** 账单口径：未命中输入(含 cache write) x miss 价 + 命中 x hit 价 + 输出 x out 价 */
@@ -263,7 +262,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.6.0',
+        version: '1.6.1',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -500,9 +499,9 @@ export default class MoneyCostService extends TypertRemoteService {
       let cost = costOf(usage, price);
       let sim = false;
       if (cost == null && price == null) {
-        // 本地/未计价模型（如 Ollama）：按 Flash 基准价模拟，单独记账，
-        // 不进 API 总额、高峰/闲时分项与 7 天柱状图
-        const simCost = costOf(usage, simPrice(currency));
+        // 本地/未计价模型（如 Ollama）：按 DeepSeek API 规则（Flash 档、高峰 ×2）
+        // 模拟，单独记账，不进 API 总额、高峰/闲时分项与 7 天柱状图
+        const simCost = costOf(usage, simPrice(currency, time));
         if (simCost != null) {
           cost = simCost;
           sim = true;

@@ -533,7 +533,7 @@ function apply(ctx) {
     const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，模拟）' : '（美元，模拟）')];
     if (r.model) lines.push('模型: ' + r.model);
     lines.push(r.sim
-      ? '本地模型：按 Flash 基准价模拟，不计入 API 消费'
+      ? '本地模型：按 DeepSeek API 规则（Flash 档，高峰 ×2）模拟，不计入 API 消费'
       : '计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时'));
     if (r.tokens) {
       lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
@@ -689,6 +689,27 @@ function apply(ctx) {
       return React.createElement('span', { 'aria-label': '账号剩余金额', ...tipProps(tip), style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
     }
     const money = React.createElement('span', { key: 'money', 'aria-label': '账号剩余金额', ...tipProps(tip), style: badgeStyle }, amount);
+    // 本地模型模拟消费徽章（白色）：汇总各工作区 simCost，点击看说明
+    let simTotal = 0;
+    if (wsTable && Array.isArray(wsTable.workspaces)) {
+      for (const w of wsTable.workspaces) { if (w && typeof w.simCost === 'number') simTotal += w.simCost; }
+    }
+    const simBadge = simTotal > 0
+      ? React.createElement('span', {
+        key: 'sim',
+        'aria-label': '本地模型模拟消费',
+        ...tipProps({ lines: [
+          '本地模型模拟消费: ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'),
+          '按 DeepSeek API 规则（Flash 档，高峰 ×2）模拟',
+          '仅展示参考，不计入 API 消费、不从余额扣除',
+        ] }),
+        style: {
+          ...badgeStyle,
+          color: 'var(--dsw-alias-label-primary,#f5f5f5)',
+          marginLeft: '4px',
+        },
+      }, '模拟 ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'))
+      : null;
     const period = balancePeriod
       ? React.createElement('span', {
         key: 'period',
@@ -699,7 +720,7 @@ function apply(ctx) {
       : null;
     return React.createElement('span', {
       style: { display: 'inline-flex', alignItems: 'center', gap: '4px' },
-    }, money, period);
+    }, money, simBadge, period);
   }
 
   // ---- 侧边栏工作区行费用（DOM 注入：0.2.x 无工作区行 Slot）----
