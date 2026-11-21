@@ -1,12 +1,21 @@
 {
   "name": "@deepseek-ai/dsh-typert-protocol",
-  "version": "0.2.1-rc.5",
+  "version": "0.2.2-rc.5",
   "private": true,
   "type": "module",
   "types": "src/index.ts",
   "exports": {
-    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
-    "./remote-info": { "types": "./src/remote-info.ts", "default": "./src/remote-info.ts" },
-    "./types": { "types": "./src/types.ts", "default": "./src/types.ts" }
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./remote-info": {
+      "types": "./src/remote-info.ts",
+      "default": "./src/remote-info.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "default": "./src/types.ts"
+    }
   }
 }

@@ -3,7 +3,7 @@
  *
  * UI（全部走 Slot 注册，不再依赖已移除的 data-slot DOM 锚点）：
  *  - conversation.composer.dock：输入区下方统计行（本对话费用，金色徽章）
- *  - conversation.chat.assistant-actions：每条回复费用标签（悬停明细）
+ *  - conversation.chat.assistant-actions：每条回复费用标签（点击弹明细）
  *  - settings.general.item：费用显示货币设置行
  *  - sidebar.footer.action：侧边栏底部余额徽章（设置按钮旁）
  *  - 侧边栏工作区行：按 data-row-key="workspace:<id>" 注入工作区总费用徽章
@@ -104,7 +104,7 @@ function apply(ctx) {
     background: 'var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.12))',
     lineHeight: '18px',
     whiteSpace: 'nowrap',
-    cursor: 'default',
+    cursor: 'pointer',
   };
 
   // 时段徽章：高峰用暖色、闲时用绿色，与金色的金额徽章区分
@@ -116,12 +116,13 @@ function apply(ctx) {
     };
   }
 
-  // ---- 自绘悬停提示 ----
-  // DSH 桌面端不显示原生 title 提示（浏览器/Electron 窗口内均不可靠），
-  // 这里用自建的单例浮层渲染多行明细；React 徽章与 DOM 注入徽章共用。
+  // ---- 自绘点击弹出细节 ----
+  // DSH 桌面端不显示原生 title 提示；徽章点击后用自绘的单例浮层弹出多行细节，
+  // 再次点击同一徽章 / 点击其它位置 / Esc 收起；滚动与窗口缩放时跟随重定位。
+  // React 徽章与 DOM 注入徽章共用。
   let tipEl = null;
   let tipText = '';
-  let tipVisible = false;
+  let tipAnchor = null;
 
   function ensureTip() {
     if (tipEl || typeof document === 'undefined') return tipEl;
@@ -130,7 +131,6 @@ function apply(ctx) {
     tipEl.style.cssText = [
       'position:fixed',
       'z-index:2147483000',
-      'pointer-events:none',
       'max-width:360px',
       'padding:8px 10px',
       'border-radius:8px',
@@ -138,6 +138,7 @@ function apply(ctx) {
       'line-height:18px',
       'white-space:pre-line',
       'word-break:break-word',
+      'user-select:text',
       'color:var(--dsw-alias-label-primary,#f5f5f5)',
       'background:var(--dsw-alias-bg-elevated,rgba(32,32,36,0.96))',
       'border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,0.12))',
@@ -150,54 +151,93 @@ function apply(ctx) {
     return tipEl;
   }
 
-  function placeTip(x, y) {
-    const el = ensureTip();
-    if (!el || typeof window === 'undefined') return;
-    const rect = el.getBoundingClientRect();
-    const pad = 12;
-    let left = x + pad;
-    let top = y + pad + 4;
-    if (left + rect.width > window.innerWidth - 8) left = Math.max(8, x - pad - rect.width);
-    if (top + rect.height > window.innerHeight - 8) top = Math.max(8, y - pad - rect.height);
+  function isAttached(el) {
+    if (!el) return false;
+    if (typeof el.isConnected === 'boolean') return el.isConnected;
+    return true; // DOM 桩未实现 isConnected 时按已挂载处理
+  }
+
+  /** 依据锚点徽章定位：优先贴在徽章下方，空间不足翻到上方，并夹紧到视口内 */
+  function placeTip() {
+    const el = tipEl;
+    if (!el || !isAttached(tipAnchor) || typeof window === 'undefined') { hideTip(); return; }
+    const rect = tipAnchor.getBoundingClientRect();
+    const panel = el.getBoundingClientRect();
+    const gap = 6;
+    let left = rect.left;
+    let top = rect.bottom + gap;
+    if (top + panel.height > window.innerHeight - 8) top = Math.max(8, rect.top - gap - panel.height);
+    if (left + panel.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - panel.width);
     el.style.left = left + 'px';
     el.style.top = top + 'px';
   }
 
-  function showTip(text, ev) {
-    if (!text) { hideTip(); return; }
+  function showTip(text, anchor) {
+    if (!text || !anchor) { hideTip(); return; }
     const el = ensureTip();
-    if (!el || !ev || typeof ev.clientX !== 'number') return;
-    if (text !== tipText) { el.textContent = text; tipText = text; }
-    placeTip(ev.clientX, ev.clientY);
+    if (!el) return;
+    if (text !== tipText || tipAnchor !== anchor) { el.textContent = text; tipText = text; }
+    tipAnchor = anchor;
     el.style.opacity = '1';
     el.style.transform = 'translateY(0)';
-    tipVisible = true;
+    placeTip();
   }
 
   function hideTip() {
+    tipAnchor = null;
     if (!tipEl) return;
     tipEl.style.opacity = '0';
     tipEl.style.transform = 'translateY(2px)';
-    tipVisible = false;
   }
 
-  /** React 元素悬停 props：进入显示、移动跟随、离开隐藏 */
+  function toggleTip(text, anchor) {
+    if (tipAnchor === anchor) hideTip();
+    else showTip(text, anchor);
+  }
+
+  /** React 元素点击 props：点击弹出/收起细节（阻止冒泡避免触发所在行/按钮） */
   function tipProps(text) {
     return {
-      onMouseEnter: (e) => showTip(text, e),
-      onMouseMove: (e) => { if (tipVisible) placeTip(e.clientX, e.clientY); },
-      onMouseLeave: hideTip,
+      role: 'button',
+      'aria-haspopup': 'dialog',
+      onClick: (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        toggleTip(text, e && e.currentTarget ? e.currentTarget : e && e.target);
+      },
+      onKeyDown: (e) => {
+        if (e && (e.key === 'Enter' || e.key === ' ')) {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          if (typeof e.stopPropagation === 'function') e.stopPropagation();
+          toggleTip(text, e.currentTarget || e.target);
+        }
+      },
     };
   }
 
-  // 兜底：点击或滚动时收起浮层，避免组件卸载/行重建后提示残留
-  const hideOnAny = () => hideTip();
+  // 兜底：点击浮层与锚点之外、按 Esc、滚动/缩放时收起或跟随（避免组件卸载后残留）
+  function onDocPointerDown(e) {
+    if (!tipAnchor || !tipEl) return;
+    const target = e && e.target;
+    if (target === tipEl || (tipEl.contains && tipEl.contains(target))) return;
+    if (target === tipAnchor || (tipAnchor.contains && tipAnchor.contains(target))) return;
+    hideTip();
+  }
+  function onDocKeyDown(e) {
+    if (e && e.key === 'Escape') hideTip();
+  }
+  function onReflow() {
+    if (tipAnchor) placeTip();
+  }
 
   /** DOM 注入徽章的等价监听（一次性绑定，文案由 badge.__dshMoneyTip 提供） */
   function bindTip(badge) {
-    badge.addEventListener('mouseenter', (e) => showTip(badge.__dshMoneyTip, e));
-    badge.addEventListener('mousemove', (e) => { if (tipVisible) placeTip(e.clientX, e.clientY); });
-    badge.addEventListener('mouseleave', hideTip);
+    if (badge.__dshMoneyBound) return;
+    badge.__dshMoneyBound = true;
+    badge.addEventListener('click', (e) => {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      toggleTip(badge.__dshMoneyTip, badge);
+    });
   }
 
   function periodLabel(period) {
@@ -267,7 +307,7 @@ function apply(ctx) {
     return lines.join('\n');
   }
 
-  /** 悬停明细：本对话总额 + 高峰/闲时分别合计（含条数） */
+  /** 细节明细：本对话总额 + 高峰/闲时分别合计（含条数） */
   function conversationTooltip(o, currency) {
     const lines = ['本对话累计费用（估算）: ' + fmtMoney(o.conversationCost, currency)];
     const replies = Array.isArray(o.replies) ? o.replies : [];
@@ -441,7 +481,7 @@ function apply(ctx) {
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'dsh-money-ws-badge';
-          badge.style.cssText = 'color:#f0c11d;font-size:11px;padding:0 4px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;';
+          badge.style.cssText = 'color:#f0c11d;font-size:11px;padding:0 4px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;cursor:pointer;';
           bindTip(badge);
           row.appendChild(badge);
         }
@@ -483,14 +523,22 @@ function apply(ctx) {
   }
 
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    document.addEventListener('mousedown', hideOnAny, true);
-    document.addEventListener('scroll', hideOnAny, true);
+    document.addEventListener('pointerdown', onDocPointerDown, true);
+    document.addEventListener('keydown', onDocKeyDown, true);
+    document.addEventListener('scroll', onReflow, true);
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', onReflow);
+    }
   }
 
   ctx.effect(() => () => {
     if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
-      document.removeEventListener('mousedown', hideOnAny, true);
-      document.removeEventListener('scroll', hideOnAny, true);
+      document.removeEventListener('pointerdown', onDocPointerDown, true);
+      document.removeEventListener('keydown', onDocKeyDown, true);
+      document.removeEventListener('scroll', onReflow, true);
+    }
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('resize', onReflow);
     }
     if (observer) { try { observer.disconnect(); } catch (e) {} observer = null; }
     if (periodTimer) { clearTimeout(periodTimer); periodTimer = null; }
