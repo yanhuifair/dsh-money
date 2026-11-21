@@ -129,23 +129,27 @@ function apply(ctx) {
     tipEl = document.createElement('div');
     tipEl.setAttribute('data-dsh-money-tip', '');
     tipEl.style.cssText = [
+      // 与原生 Tooltip 气泡一致：dsh-client-ui-theme 的 --dsw-alias-tooltip-*，
+      // 无描边、无阴影、radius-sm，淡入 .15s（prefers-reduced-motion 时禁用）
       'position:fixed',
-      'z-index:2147483000',
-      'max-width:360px',
-      'padding:8px 10px',
-      'border-radius:8px',
-      'font-size:12px',
-      'line-height:18px',
+      'z-index:1100',
+      'width:max-content',
+      'box-sizing:border-box',
+      'max-width:min(50vw,calc(100vw - 24px))',
+      'max-height:calc(100vh - 24px)',
+      'overflow:auto',
+      'padding:3px 7px',
+      'border-radius:var(--dsw-radius-sm,8px)',
+      'background:var(--dsw-alias-tooltip-bg,var(--dsw-static-neutral-bluish-850,rgba(37,42,52,0.97)))',
+      'color:var(--dsw-alias-tooltip-label,var(--dsw-static-neutral-bluish-00,#fff))',
+      'font-size:13px',
+      'line-height:20px',
       'white-space:pre-line',
-      'word-break:break-word',
+      'overflow-wrap:break-word',
       'user-select:text',
-      'color:var(--dsw-alias-label-primary,#f5f5f5)',
-      'background:var(--dsw-alias-bg-elevated,rgba(32,32,36,0.96))',
-      'border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,0.12))',
-      'box-shadow:0 8px 24px rgba(0,0,0,0.28)',
+      '-webkit-app-region:no-drag',
       'opacity:0',
-      'transform:translateY(2px)',
-      'transition:opacity 120ms ease, transform 120ms ease',
+      'transition:opacity 150ms var(--ds-ease-in-out,ease)',
     ].join(';');
     try { document.body.appendChild(tipEl); } catch (e) { tipEl = null; }
     return tipEl;
@@ -178,8 +182,8 @@ function apply(ctx) {
     if (!el) return;
     if (text !== tipText || tipAnchor !== anchor) { el.textContent = text; tipText = text; }
     tipAnchor = anchor;
+    applyMotionPreference();
     el.style.opacity = '1';
-    el.style.transform = 'translateY(0)';
     placeTip();
   }
 
@@ -187,7 +191,15 @@ function apply(ctx) {
     tipAnchor = null;
     if (!tipEl) return;
     tipEl.style.opacity = '0';
-    tipEl.style.transform = 'translateY(2px)';
+  }
+
+  // 原生同样在 prefers-reduced-motion 下禁用动画；这里让淡入即时完成
+  function applyMotionPreference() {
+    if (!tipEl || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    try {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) tipEl.style.transition = 'none';
+      else tipEl.style.transition = 'opacity 150ms var(--ds-ease-in-out,ease)';
+    } catch (e) {}
   }
 
   function toggleTip(text, anchor) {
