@@ -281,7 +281,7 @@ function apply(ctx) {
     svg.appendChild(hub);
     // 刻度 0/6/12/18 在圆外
     const tickStyle = 'font-size:9px;fill:var(--dsw-alias-label-tertiary,#7a7a85);font-variant-numeric:tabular-nums;';
-    const ticks = [[12, CC, 6, 'middle'], ['3', 94, CC + 3, 'end'], [6, CC, 96, 'middle'], [9, 4, CC + 3, 'start']];
+    const ticks = [['12', CC, 6, 'middle'], ['03', 94, CC + 3, 'end'], ['06', CC, 96, 'middle'], ['09', 4, CC + 3, 'start']];
     for (const [t, x, y, anchor] of ticks) {
       const txt = document.createElementNS(SVG, 'text');
       txt.setAttribute('x', String(x)); txt.setAttribute('y', String(y));
@@ -306,7 +306,7 @@ function apply(ctx) {
     el.appendChild(legend);
     const caption = document.createElement('div');
     caption.style.cssText = 'text-align:center;font-size:9px;line-height:12px;color:var(--dsw-alias-label-tertiary,#7a7a85);margin-bottom:2px;';
-    caption.textContent = '一圈 12 小时：下午时段按 12 小时制显示（14-18 点即 2-6 点位置）';
+    caption.textContent = '一圈 12 小时：下午时段按 12 小时制显示（14:00-18:00 即 02-06 位置）';
     el.appendChild(caption);
   }
 
@@ -493,7 +493,8 @@ function apply(ctx) {
     // 当天时刻盘（host 1.5.2+ 提供 dayMidnightAt / dayPeakWindows）
     if (typeof period.dayMidnightAt === 'number' && Array.isArray(period.dayPeakWindows)) {
       const wins = period.dayPeakWindows;
-      out.lines.push('今日高峰窗口：' + (wins.length ? wins.map((w) => w[0] + ':00-' + w[1] + ':00').join('、') : '全天闲时（周末/节假日）'));
+      const two = (h) => String(h).padStart(2, '0');
+      out.lines.push('今日高峰窗口：' + (wins.length ? wins.map((w) => two(w[0]) + ':00-' + two(w[1]) + ':00').join('、') : '全天闲时（周末/节假日）'));
       out.clock = { midnight: period.dayMidnightAt, windows: wins, now: Date.now() };
     }
     return out;
