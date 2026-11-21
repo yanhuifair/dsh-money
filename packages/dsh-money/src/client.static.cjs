@@ -99,8 +99,8 @@ function apply(ctx) {
   // 本地模型模拟徽章：独立于 API 计费徽章，白字，放 API 徽章右侧
   const simBadgeStyle = { color: 'var(--dsw-alias-label-primary,#f5f5f5)' };
   function simTip(total, count, currency) {
-    const lines = ['本地模型模拟消费: ' + fmtMoney(total, currency) + (count > 0 ? '（' + count + ' 条）' : '')];
-    lines.push('按 DeepSeek API 规则（Flash 档，高峰 ×2）模拟');
+    const lines = ['本地模型消费: ' + fmtMoney(total, currency) + (count > 0 ? '（' + count + ' 条）' : '')];
+    lines.push('本地模型无 API 账单，此金额按 DeepSeek API 规则（Flash 档，高峰 ×2）估算');
     lines.push('仅展示参考，不计入 API 消费、不从余额扣除');
     return { lines: lines };
   }
@@ -541,7 +541,7 @@ function apply(ctx) {
     const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，模拟）' : '（美元，模拟）')];
     if (r.model) lines.push('模型: ' + r.model);
     lines.push(r.sim
-      ? '本地模型：按 DeepSeek API 规则（Flash 档，高峰 ×2）模拟，不计入 API 消费'
+      ? '本地模型无 API 账单：按 DeepSeek API 规则（Flash 档，高峰 ×2）估算，不计入 API 消费'
       : '计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时'));
     if (r.tokens) {
       lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
@@ -608,10 +608,10 @@ function apply(ctx) {
       simCost > 0
         ? React.createElement('span', {
           key: 'conv-sim',
-          'aria-label': '本对话本地模型模拟消费',
+          'aria-label': '本对话本地模型消费',
           ...tipProps(simTip(simCost, simCountOf(o), currency)),
           style: { ...badgeStyle, ...simBadgeStyle },
-        }, '模拟 ' + fmtMoney(simCost, currency))
+        }, '本地 ' + fmtMoney(simCost, currency))
         : null,
     );
   }
@@ -636,10 +636,10 @@ function apply(ctx) {
     if (!reply || reply.cost == null) return null;
     return React.createElement('span', {
       className: 'dsh-cost-reply',
-      'aria-label': reply.sim ? '本次回复本地模拟费用' : '本次回复费用（估算）',
+      'aria-label': reply.sim ? '本次回复本地模型费用' : '本次回复费用（估算）',
       ...tipProps(replyTooltip(reply, currency)),
       style: { ...badgeStyle, ...(reply.sim ? simBadgeStyle : null), marginLeft: '4px', marginRight: '2px' },
-    }, (reply.sim ? '模拟 ' : '') + fmtMoney(reply.cost, currency));
+    }, (reply.sim ? '本地 ' : '') + fmtMoney(reply.cost, currency));
   }
 
   // ---- 侧边栏底部余额（sidebar.footer.action Slot）----
@@ -708,14 +708,14 @@ function apply(ctx) {
     const simBadge = simTotal > 0
       ? React.createElement('span', {
         key: 'sim',
-        'aria-label': '本地模型模拟消费',
+        'aria-label': '本地模型消费',
         ...tipProps({ lines: [
-          '本地模型模拟消费: ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'),
-          '按 DeepSeek API 规则（Flash 档，高峰 ×2）模拟',
+          '本地模型消费: ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'),
+          '本地模型无 API 账单，此金额按 DeepSeek API 规则（Flash 档，高峰 ×2）估算',
           '仅展示参考，不计入 API 消费、不从余额扣除',
         ] }),
         style: { ...badgeStyle, ...simBadgeStyle, marginLeft: '4px' },
-      }, '模拟 ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'))
+      }, '本地 ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'))
       : null;
     const period = balancePeriod
       ? React.createElement('span', {
@@ -791,7 +791,7 @@ function apply(ctx) {
         }
         // 本地模拟徽章（白色）：独立，紧跟 API 徽章右侧
         let simBadgeEl = row.querySelector('.dsh-money-ws-sim');
-        const simText = sim > 0 ? '模拟 ' + fmtMoney(sim, wsTable.currency) : null;
+        const simText = sim > 0 ? '本地 ' + fmtMoney(sim, wsTable.currency) : null;
         const simTipText = sim > 0 ? simTip(sim, 0, wsTable.currency).lines.join('\n') : null;
         if (simText == null) {
           if (simBadgeEl) simBadgeEl.remove();
