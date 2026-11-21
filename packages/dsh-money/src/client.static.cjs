@@ -167,24 +167,49 @@ function apply(ctx) {
     while (el.firstChild) el.removeChild(el.firstChild);
     el.__dshMoneyText = text;
     const lines = String(text).split('\n');
+    // 标题行：左标签右数值（原生「会话统计」弹窗同款，值 tabular-nums）
     const title = document.createElement('div');
-    title.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);font-weight:500;margin-bottom:8px;display:flex;justify-content:space-between;gap:16px;';
-    title.textContent = lines[0];
-    el.appendChild(title);
-    if (lines.length < 2) return;
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;color:var(--dsw-alias-label-tertiary,#7a7a85);';
-    for (const line of lines.slice(1)) {
-      const m = line.match(/^(.{1,24}?)([:：])\s*([\s\S]*)$/);
-      const dt = document.createElement('div');
-      const dd = document.createElement('div');
-      dd.style.cssText = 'overflow-wrap:anywhere;white-space:pre-line;';
-      if (m) { dt.textContent = m[1]; dd.textContent = m[3]; }
-      else { dt.textContent = ''; dd.textContent = line; }
-      grid.appendChild(dt);
-      grid.appendChild(dd);
+    title.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:16px;color:var(--dsw-alias-label-primary,#f5f5f5);font-weight:500;';
+    const tm = lines[0].match(/^(.{1,24}?)[:：]\s*([\s\S]+)$/);
+    if (tm) {
+      const tl = document.createElement('span');
+      tl.textContent = tm[1];
+      const tv = document.createElement('span');
+      tv.style.cssText = 'font-variant-numeric:tabular-nums;white-space:nowrap;';
+      tv.textContent = tm[2];
+      title.appendChild(tl);
+      title.appendChild(tv);
+    } else {
+      title.textContent = lines[0];
     }
-    el.appendChild(grid);
+    el.appendChild(title);
+    if (lines.length > 1) {
+      const rule = document.createElement('div');
+      rule.style.cssText = 'border-top:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,0.25));margin:8px 0 10px;';
+      el.appendChild(rule);
+      // 明细行：左灰色标签、右白色数值（原生同款）；无标签的说明行占满整行
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:10px 16px;';
+      for (const line of lines.slice(1)) {
+        const m = line.match(/^(.{1,24}?)[:：]\s*([\s\S]*)$/);
+        const dt = document.createElement('div');
+        const dd = document.createElement('div');
+        if (m) {
+          dt.style.cssText = 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
+          dd.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);text-align:right;overflow-wrap:anywhere;white-space:pre-line;font-variant-numeric:tabular-nums;';
+          dt.textContent = m[1];
+          dd.textContent = m[2];
+        } else {
+          dd.style.cssText = 'grid-column:1 / -1;color:var(--dsw-alias-label-secondary,#a0a0a8);white-space:pre-line;';
+          dd.textContent = line;
+          grid.appendChild(dd);
+          continue;
+        }
+        grid.appendChild(dt);
+        grid.appendChild(dd);
+      }
+      el.appendChild(grid);
+    }
   }
 
   function isAttached(el) {
@@ -454,7 +479,18 @@ function apply(ctx) {
     if (!balanceLoaded) return null;
     const wide = !(props && props.wide === false);
     const amount = fmtBalance(balance);
-    const tip = '账号剩余金额（自动刷新）' + (balance && balance.source === 'api-key' ? '\n来源: API Key 余额' : '');
+    const tipLines = ['账号剩余金额: ' + amount];
+    if (balance && balance.source === 'api-key') tipLines.push('来源: API Key 余额');
+    if (wsDays && wsDays.length) {
+      const cur = wsTable && wsTable.currency ? wsTable.currency : 'CNY';
+      let week = 0;
+      for (const d of wsDays) { if (d && typeof d.cost === 'number') week += d.cost; }
+      tipLines.push('最近 7 天（估算）: ' + fmtMoney(week, cur));
+      for (const d of wsDays) {
+        if (d && typeof d.cost === 'number') tipLines.push(d.date + ': ' + fmtMoney(d.cost, cur));
+      }
+    }
+    const tip = tipLines.join('\n');
     if (!wide) {
       // 56px 折叠态：只显示币种符号，避免挤压设置按钮
       const sym = balance && balance.currency === 'USD' ? '$' : '¥';
@@ -479,6 +515,7 @@ function apply(ctx) {
   let started = false;
   let applying = false;
   let wsTable = null;
+  let wsDays = null; // 最近 7 天消费（host workspacesAll 顺路返回）
 
   function loadWsTable() {
     remote.workspacesAll()
@@ -486,6 +523,9 @@ function apply(ctx) {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object' && !value.error) {
           wsTable = value;
+          wsDays = Array.isArray(value.days) ? value.days : null;
+          // 让余额弹窗能用上近 7 天数据：驱动 BalanceAction 重渲染
+          for (const fn of Array.from(balanceListeners)) { try { fn(balance); } catch (e) {} }
           applyBadges();
         }
       })

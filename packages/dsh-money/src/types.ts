@@ -74,7 +74,15 @@ export interface MoneyWorkspaceCost {
 }
 
 /** 全量工作区费用表 */
+/** 单日消费（date = MM-DD，按北京时间自然日） */
+export interface MoneyDayCost {
+  date: string;
+  cost: number;
+}
+
 export interface MoneyWorkspacesAll {
+  /** 最近 7 个自然日（含今天，新→旧）的总消费，缺数据的日子为 0 */
+  days: MoneyDayCost[];
   currency: string;
   workspaces: MoneyWorkspaceCost[];
 }

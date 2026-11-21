@@ -21,6 +21,7 @@ import type {
   MoneyConfigResult,
   MoneyCostOverview,
   MoneyReplyCost,
+  MoneyDayCost,
   MoneyWorkspaceCost,
   MoneyWorkspacesAll,
 } from './types.js';
@@ -48,6 +49,7 @@ const MODEL_ALIASES: Record<string, string> = {
 };
 
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * 中国法定节假日（放假日，北京时间日期）。来源：国务院办公厅《关于2026年部分节假日安排的通知》
@@ -132,6 +134,25 @@ function periodStart(ms: number): number {
 /** 当前时段快照（高峰/闲时 + 本段起点 + 下次切换时间） */
 function currentPeriod(ms: number = Date.now()): { peak: boolean; since: number; nextChangeAt: number } {
   return { peak: isPeak(ms), since: periodStart(ms), nextChangeAt: nextPeriodChange(ms) };
+}
+
+/** 近 7 天全 0 占位（无注册表/读取失败时） */
+function emptyDays(): MoneyDayCost[] {
+  const now = Date.now();
+  const out: MoneyDayCost[] = [];
+  for (let i = 0; i < 7; i++) {
+    out.push({ date: dayKeyBeijing(now - i * DAY_MS).slice(5), cost: 0 });
+  }
+  return out;
+}
+
+/** 北京时间自然日键：YYYY-MM-DD */
+function dayKeyBeijing(ms: number): string {
+  const d = new Date(ms + BEIJING_OFFSET_MS);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
 }
 
 function modelOf(model: string): string {
@@ -225,7 +246,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.4.2',
+        version: '1.5.0',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -370,17 +391,17 @@ export default class MoneyCostService extends TypertRemoteService {
   /** 会话折叠增量状态：记录最后处理的 seq，只折叠新增事件（key = sessionId + currency） */
   private foldCache = new Map<
     string,
-    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; lastSeq: number }
+    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; days: Record<string, number>; lastSeq: number }
   >();
 
   /** 折叠会话：增量处理（只读新增事件并追加，避免重复遍历整个日志） */
   private async foldSession(
     sessionId: string,
     currency: 'CNY' | 'USD',
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null }> {
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; days: Record<string, number> }> {
     const key = sessionId + '::' + currency;
     const cached = this.foldCache.get(key);
-    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null };
+    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null, days: {} as Record<string, number> };
     const sessionQuery = this.ctx.get('sessionQuery') as
       | { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> }
       | undefined;
@@ -391,7 +412,7 @@ export default class MoneyCostService extends TypertRemoteService {
       events = snap && Array.isArray(snap.events) ? (snap.events as Array<Record<string, unknown> & { seq?: number }>) : [];
     } catch (e) {
       return cached
-        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost }
+        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost, days: { ...cached.days } }
         : empty;
     }
     // 增量：从缓存的 lastSeq 之后继续；无缓存则全量
@@ -404,16 +425,18 @@ export default class MoneyCostService extends TypertRemoteService {
     };
     // 只处理 seq > fromSeq 的新增事件
     const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number' ? e.seq > fromSeq : true)) : events;
-    const fold = await this.foldEvents(newEvents, currency, freshReplies, carried);
+    const daysOut: Record<string, number> = cached ? { ...cached.days } : {};
+    const fold = await this.foldEvents(newEvents, currency, freshReplies, carried, daysOut);
     // 更新缓存（重置 TTL）
     this.foldCache.set(key, {
       replies: fold.replies,
       conversationCost: fold.conversationCost,
       peakCost: fold.peakCost,
       offPeakCost: fold.offPeakCost,
+      days: daysOut,
       lastSeq: this.maxSeq(events),
     });
-    return fold;
+    return { ...fold, days: daysOut };
   }
 
   /** 批量折叠事件（分片异步处理，避免长任务阻塞事件循环） */
@@ -422,6 +445,7 @@ export default class MoneyCostService extends TypertRemoteService {
     currency: 'CNY' | 'USD',
     replies: MoneyReplyCost[],
     carried: { conversationCost: number | null; peakCost: number | null; offPeakCost: number | null },
+    daysOut?: Record<string, number>,
   ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null }> {
     const timer = this.ctx.get('timer') as { timeout(ms: number): Promise<void> } | undefined;
     let lastModel = 'deepseek-flash';
@@ -463,6 +487,10 @@ export default class MoneyCostService extends TypertRemoteService {
           offPeakTotal += cost;
           hasOffPeak = true;
         }
+        if (daysOut) {
+          const dayKey = dayKeyBeijing(time);
+          daysOut[dayKey] = (daysOut[dayKey] || 0) + cost;
+        }
       }
       const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
       replies.push({
@@ -495,18 +523,19 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 全量工作区费用表 */
-  private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<MoneyWorkspaceCost[]> {
+  private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<{ workspaces: MoneyWorkspaceCost[]; days: MoneyDayCost[] }> {
     const registry = this.ctx.get('workspaceRegistry') as
       | { list(): Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> }
       | undefined;
-    if (!registry || typeof registry.list !== 'function') return [];
+    if (!registry || typeof registry.list !== 'function') return { workspaces: [], days: emptyDays() };
     let list: Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> = [];
     try {
       list = registry.list();
     } catch (e) {
-      return [];
+      return { workspaces: [], days: emptyDays() };
     }
     const workspaces: MoneyWorkspaceCost[] = [];
+    const dayTotals: Record<string, number> = {};
     for (const w of list) {
       const sessionIds = Array.isArray(w.sessionIds) ? (w.sessionIds as string[]) : [];
       let total = 0;
@@ -517,6 +546,9 @@ export default class MoneyCostService extends TypertRemoteService {
       let hasOffPeak = false;
       for (const sid of sessionIds) {
         const fold = await this.foldSession(sid, currency);
+        for (const [dayKey, dayCost] of Object.entries(fold.days)) {
+          dayTotals[dayKey] = (dayTotals[dayKey] || 0) + dayCost;
+        }
         if (fold.conversationCost != null) {
           total += fold.conversationCost;
           hasCost = true;
@@ -539,7 +571,15 @@ export default class MoneyCostService extends TypertRemoteService {
         sessionCount: sessionIds.length,
       });
     }
-    return workspaces;
+    // 最近 7 个自然日（含今天，新→旧）
+    const now = Date.now();
+    const days: MoneyDayCost[] = [];
+    for (let i = 0; i < 7; i++) {
+      const dayKey = dayKeyBeijing(now - i * DAY_MS);
+      const mmdd = dayKey.slice(5);
+      days.push({ date: mmdd, cost: Math.round((dayTotals[dayKey] || 0) * 1e6) / 1e6 });
+    }
+    return { workspaces, days };
   }
 
   /** 读取/设置显示币种 */
@@ -601,8 +641,8 @@ export default class MoneyCostService extends TypertRemoteService {
   async workspacesAll(): Promise<MoneyWorkspacesAll> {
     const balance = await this.cachedBalance();
     const currency = this.resolveCurrency(balance);
-    const workspaces = await this.allWorkspaceCosts(currency);
-    return { currency, workspaces };
+    const { workspaces, days } = await this.allWorkspaceCosts(currency);
+    return { currency, workspaces, days };
   }
 }
 
