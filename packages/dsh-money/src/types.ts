@@ -18,6 +18,10 @@ export interface MoneyPeriod {
   peak: boolean;
   /** 当前时段开始的时间戳（毫秒）：最近一次时段切换点 */
   since: number;
+  /** 今天（北京时间自然日）0 点的时间戳（毫秒），时刻盘指针角度基准 */
+  dayMidnightAt: number;
+  /** 今天的高峰小时区间（0-24，如 [[9,12],[14,18]]；节假日/周末为 []） */
+  dayPeakWindows: number[][];
   /** 下一次时段切换的时间戳（毫秒），客户端据此安排刷新 */
   nextChangeAt: number;
 }

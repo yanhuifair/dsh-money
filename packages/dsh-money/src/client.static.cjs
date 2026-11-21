@@ -214,6 +214,66 @@ function apply(ctx) {
     el.appendChild(wrap);
   }
 
+  /** 当天 24 小时时刻盘：0 点在正上方顺时针；高峰扇区橙、闲时绿，指针指向当前时刻 */
+  function renderClock(el, clock) {
+    const dial = document.createElement('div');
+    dial.setAttribute('data-dsh-money-clock', '');
+    dial.style.cssText = 'position:relative;width:88px;height:88px;margin:10px auto 2px;';
+    // 扇区环
+    const windows = Array.isArray(clock.windows) ? clock.windows.slice().sort((a, b) => a[0] - b[0]) : [];
+    const GREEN = 'rgba(63,185,80,0.75)';
+    const ORANGE = 'rgba(255,143,31,0.9)';
+    const pct = (h) => (h / 24 * 100).toFixed(3);
+    const segs = [];
+    let pos = 0;
+    for (const w of windows) {
+      const st = Math.max(0, Math.min(24, w[0]));
+      const en = Math.max(0, Math.min(24, w[1]));
+      if (st > pos) segs.push(GREEN + ' ' + pct(pos) + '% ' + pct(st) + '%');
+      if (en > st) segs.push(ORANGE + ' ' + pct(st) + '% ' + pct(en) + '%');
+      if (en > pos) pos = en;
+    }
+    if (pos < 24) segs.push(GREEN + ' ' + pct(pos) + '% 100%');
+    if (!segs.length) segs.push(GREEN + ' 0% 100%');
+    const ring = document.createElement('div');
+    ring.style.cssText = 'position:absolute;inset:0;border-radius:50%;background:conic-gradient('
+      + segs.join(',') + ');-webkit-mask:radial-gradient(closest-side,transparent 0 58%,#000 60%);mask:radial-gradient(closest-side,transparent 0 58%,#000 60%);';
+    dial.appendChild(ring);
+    // 指针（从圆心指向当前时刻）与圆心点
+    const DAY = 24 * 3600 * 1000;
+    const now = typeof clock.now === 'number' ? clock.now : Date.now();
+    const frac = Math.max(0, Math.min(1, (now - clock.midnight) / DAY));
+    const needle = document.createElement('div');
+    needle.style.cssText = 'position:absolute;left:50%;bottom:50%;width:1.5px;height:36%;background:var(--dsw-alias-label-primary,#f5f5f5);transform-origin:50% 100%;transform:translateX(-50%) rotate('
+      + (frac * 360).toFixed(1) + 'deg);';
+    dial.appendChild(needle);
+    const hub = document.createElement('div');
+    hub.style.cssText = 'position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;background:var(--dsw-alias-label-primary,#f5f5f5);';
+    dial.appendChild(hub);
+    // 0/6/12/18 刻度
+    const ticks = [['0', 'top:1px;left:50%;transform:translateX(-50%);'], ['6', 'top:50%;right:2px;transform:translateY(-50%);'], ['12', 'bottom:11px;left:50%;transform:translateX(-50%);'], ['18', 'top:50%;left:2px;transform:translateY(-50%);']];
+    for (const [t, css] of ticks) {
+      const el2 = document.createElement('div');
+      el2.style.cssText = 'position:absolute;' + css + 'font-size:9px;line-height:10px;color:var(--dsw-alias-label-tertiary,#7a7a85);font-variant-numeric:tabular-nums;';
+      el2.textContent = t;
+      dial.appendChild(el2);
+    }
+    el.appendChild(dial);
+    // 图例
+    const legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;justify-content:center;gap:14px;margin-bottom:2px;';
+    for (const [color, label] of [[ORANGE, '高峰'], [GREEN, '闲时']]) {
+      const item = document.createElement('span');
+      item.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--dsw-alias-label-secondary,#a0a0a8);';
+      const sw = document.createElement('span');
+      sw.style.cssText = 'width:8px;height:8px;border-radius:2px;background:' + color + ';';
+      item.appendChild(sw);
+      item.appendChild(document.createTextNode(label));
+      legend.appendChild(item);
+    }
+    el.appendChild(legend);
+  }
+
   /** 细节内容：字符串（多行文案）或 { lines, chart }；首行为标题（label-primary/500），
    *  其余按「标签: 值」渲染为原生详情网格；chart 存在时追加近 7 天柱状图 */
   function renderTip(payload) {
@@ -267,6 +327,7 @@ function apply(ctx) {
       }
       el.appendChild(grid);
     }
+    if (spec.clock) renderClock(el, spec.clock);
     if (spec.chart) renderChart(el, spec.chart);
   }
 
@@ -389,9 +450,17 @@ function apply(ctx) {
     if (!period) return '计费时段未知';
     const since = fmtDateTime(period.since);
     const next = fmtDateTime(period.nextChangeAt);
-    return period.peak
-      ? '当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）\n三档单价 ×2\n本次高峰：' + since + ' 起\n下次切换：' + next + ' 起为闲时'
-      : '当前为闲时（含周末与中国法定节假日）\n三档单价为基准价\n本次闲时：' + since + ' 起\n下次切换：' + next + ' 起为高峰';
+    const lines = period.peak
+      ? ['当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）', '三档单价 ×2', '本次高峰：' + since + ' 起', '下次切换：' + next + ' 起为闲时']
+      : ['当前为闲时（含周末与中国法定节假日）', '三档单价为基准价', '本次闲时：' + since + ' 起', '下次切换：' + next + ' 起为高峰'];
+    const out = { lines: lines.slice() };
+    // 当天时刻盘（host 1.5.2+ 提供 dayMidnightAt / dayPeakWindows）
+    if (typeof period.dayMidnightAt === 'number' && Array.isArray(period.dayPeakWindows)) {
+      const wins = period.dayPeakWindows;
+      out.lines.push('今日高峰窗口：' + (wins.length ? wins.map((w) => w[0] + ':00-' + w[1] + ':00').join('、') : '全天闲时（周末/节假日）'));
+      out.clock = { midnight: period.dayMidnightAt, windows: wins, now: Date.now() };
+    }
+    return out;
   }
 
   function moneySymbol(currency) {

@@ -131,9 +131,20 @@ function periodStart(ms: number): number {
   return ms - DAY;
 }
 
-/** 当前时段快照（高峰/闲时 + 本段起点 + 下次切换时间） */
-function currentPeriod(ms: number = Date.now()): { peak: boolean; since: number; nextChangeAt: number } {
-  return { peak: isPeak(ms), since: periodStart(ms), nextChangeAt: nextPeriodChange(ms) };
+/** 今天（北京时间自然日）的高峰小时区间：工作日且非节假日 → 9-12、14-18，否则空 */
+function dayPeakWindows(midnightMs: number): number[][] {
+  const d = new Date(midnightMs + BEIJING_OFFSET_MS);
+  const weekday = d.getUTCDay();
+  if (weekday === 0 || weekday === 6) return [];
+  const key = d.toISOString().slice(0, 10);
+  if (CN_HOLIDAYS.has(key)) return [];
+  return [[9, 12], [14, 18]];
+}
+
+/** 当前时段快照（高峰/闲时 + 本段起点 + 下次切换时间 + 今日时刻盘数据） */
+function currentPeriod(ms: number = Date.now()): { peak: boolean; since: number; nextChangeAt: number; dayMidnightAt: number; dayPeakWindows: number[][] } {
+  const dayMidnight = Math.floor((ms + BEIJING_OFFSET_MS) / DAY_MS) * DAY_MS - BEIJING_OFFSET_MS;
+  return { peak: isPeak(ms), since: periodStart(ms), nextChangeAt: nextPeriodChange(ms), dayMidnightAt: dayMidnight, dayPeakWindows: dayPeakWindows(dayMidnight) };
 }
 
 /** 近 7 天全 0 占位（无注册表/读取失败时） */
@@ -246,7 +257,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.5.1',
+        version: '1.5.2',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
