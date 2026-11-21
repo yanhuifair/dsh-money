@@ -214,51 +214,75 @@ function apply(ctx) {
     el.appendChild(wrap);
   }
 
-  /** 当天 24 小时时刻盘：0 点在正上方顺时针；高峰扇区橙、闲时绿，指针指向当前时刻 */
+  /** 当天 24 小时时刻盘（SVG 实心饼）：0 点正上方顺时针；闲时整圆绿底，
+   *  高峰窗口画橙色扇区，指针指向当前时刻；SVG 保证任何缩放下都是正圆 */
   function renderClock(el, clock) {
-    const dial = document.createElement('div');
-    dial.setAttribute('data-dsh-money-clock', '');
-    dial.style.cssText = 'position:relative;width:88px;height:88px;margin:10px auto 2px;';
-    // 扇区环
-    const windows = Array.isArray(clock.windows) ? clock.windows.slice().sort((a, b) => a[0] - b[0]) : [];
+    const SVG = 'http://www.w3.org/2000/svg';
+    const C = 44, R = 42;
     const GREEN = 'rgba(63,185,80,0.75)';
     const ORANGE = 'rgba(255,143,31,0.9)';
-    const pct = (h) => (h / 24 * 100).toFixed(3);
-    const segs = [];
-    let pos = 0;
+    // 小时 → 坐标（0 点在正上方，顺时针）
+    const CC = C + 5; // 圆心（画布 98，四周留刻度位）
+    const pt = (hour, r) => {
+      const a = (hour / 24) * Math.PI * 2 - Math.PI / 2;
+      return [CC + r * Math.cos(a), CC + r * Math.sin(a)];
+    };
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('data-dsh-money-clock', '');
+    svg.setAttribute('width', '98');
+    svg.setAttribute('height', '98');
+    svg.setAttribute('viewBox', '0 0 98 98');
+    svg.style.cssText = 'display:block;margin:10px auto 2px;overflow:visible;';
+    const base = document.createElementNS(SVG, 'circle');
+    base.setAttribute('cx', String(CC)); base.setAttribute('cy', String(CC));
+    base.setAttribute('r', String(R)); base.setAttribute('fill', GREEN);
+    svg.appendChild(base);
+    const windows = Array.isArray(clock.windows) ? clock.windows.slice().sort((a, b) => a[0] - b[0]) : [];
     for (const w of windows) {
       const st = Math.max(0, Math.min(24, w[0]));
       const en = Math.max(0, Math.min(24, w[1]));
-      if (st > pos) segs.push(GREEN + ' ' + pct(pos) + '% ' + pct(st) + '%');
-      if (en > st) segs.push(ORANGE + ' ' + pct(st) + '% ' + pct(en) + '%');
-      if (en > pos) pos = en;
+      if (!(en > st)) continue;
+      const [x1, y1] = pt(st, R);
+      const [x2, y2] = pt(en, R);
+      const large = en - st > 12 ? 1 : 0;
+      const path = document.createElementNS(SVG, 'path');
+      const cc = String(CC);
+      path.setAttribute('d',
+        'M' + cc + ',' + cc +
+        ' L' + x1.toFixed(2) + ',' + y1.toFixed(2) +
+        ' A' + R + ',' + R + ' 0 ' + large + ' 1 ' + x2.toFixed(2) + ',' + y2.toFixed(2) + ' Z');
+      path.setAttribute('fill', ORANGE);
+      svg.appendChild(path);
     }
-    if (pos < 24) segs.push(GREEN + ' ' + pct(pos) + '% 100%');
-    if (!segs.length) segs.push(GREEN + ' 0% 100%');
-    const ring = document.createElement('div');
-    ring.style.cssText = 'position:absolute;inset:0;border-radius:50%;background:conic-gradient('
-      + segs.join(',') + ');-webkit-mask:radial-gradient(closest-side,transparent 0 58%,#000 60%);mask:radial-gradient(closest-side,transparent 0 58%,#000 60%);';
-    dial.appendChild(ring);
-    // 指针（从圆心指向当前时刻）与圆心点
+    // 指针：圆心指向当前时刻
     const DAY = 24 * 3600 * 1000;
     const now = typeof clock.now === 'number' ? clock.now : Date.now();
-    const frac = Math.max(0, Math.min(1, (now - clock.midnight) / DAY));
-    const needle = document.createElement('div');
-    needle.style.cssText = 'position:absolute;left:50%;bottom:50%;width:1.5px;height:36%;background:var(--dsw-alias-label-primary,#f5f5f5);transform-origin:50% 100%;transform:translateX(-50%) rotate('
-      + (frac * 360).toFixed(1) + 'deg);';
-    dial.appendChild(needle);
-    const hub = document.createElement('div');
-    hub.style.cssText = 'position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;background:var(--dsw-alias-label-primary,#f5f5f5);';
-    dial.appendChild(hub);
-    // 0/6/12/18 刻度
-    const ticks = [['0', 'top:1px;left:50%;transform:translateX(-50%);'], ['6', 'top:50%;right:2px;transform:translateY(-50%);'], ['12', 'bottom:11px;left:50%;transform:translateX(-50%);'], ['18', 'top:50%;left:2px;transform:translateY(-50%);']];
-    for (const [t, css] of ticks) {
-      const el2 = document.createElement('div');
-      el2.style.cssText = 'position:absolute;' + css + 'font-size:9px;line-height:10px;color:var(--dsw-alias-label-tertiary,#7a7a85);font-variant-numeric:tabular-nums;';
-      el2.textContent = t;
-      dial.appendChild(el2);
+    const hour = Math.max(0, Math.min(24, (now - clock.midnight) / DAY * 24));
+    const [nx, ny] = pt(hour, R - 8);
+    const needle = document.createElementNS(SVG, 'line');
+    needle.setAttribute('x1', String(CC)); needle.setAttribute('y1', String(CC));
+    needle.setAttribute('x2', nx.toFixed(2)); needle.setAttribute('y2', ny.toFixed(2));
+    needle.setAttribute('stroke', 'var(--dsw-alias-label-primary,#f5f5f5)');
+    needle.setAttribute('stroke-width', '2');
+    needle.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(needle);
+    const hub = document.createElementNS(SVG, 'circle');
+    hub.setAttribute('cx', String(CC)); hub.setAttribute('cy', String(CC));
+    hub.setAttribute('r', '2.5');
+    hub.setAttribute('fill', 'var(--dsw-alias-label-primary,#f5f5f5)');
+    svg.appendChild(hub);
+    // 刻度 0/6/12/18 在圆外
+    const tickStyle = 'font-size:9px;fill:var(--dsw-alias-label-tertiary,#7a7a85);font-variant-numeric:tabular-nums;';
+    const ticks = [[0, CC, 6, 'middle'], [6, 92, CC + 3, 'end'], [12, CC, 96, 'middle'], [18, 6, CC + 3, 'start']];
+    for (const [t, x, y, anchor] of ticks) {
+      const txt = document.createElementNS(SVG, 'text');
+      txt.setAttribute('x', String(x)); txt.setAttribute('y', String(y));
+      txt.setAttribute('text-anchor', anchor);
+      txt.setAttribute('style', tickStyle);
+      txt.textContent = String(t);
+      svg.appendChild(txt);
     }
-    el.appendChild(dial);
+    el.appendChild(svg);
     // 图例
     const legend = document.createElement('div');
     legend.style.cssText = 'display:flex;justify-content:center;gap:14px;margin-bottom:2px;';
@@ -266,7 +290,7 @@ function apply(ctx) {
       const item = document.createElement('span');
       item.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--dsw-alias-label-secondary,#a0a0a8);';
       const sw = document.createElement('span');
-      sw.style.cssText = 'width:8px;height:8px;border-radius:2px;background:' + color + ';';
+      sw.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + color + ';';
       item.appendChild(sw);
       item.appendChild(document.createTextNode(label));
       legend.appendChild(item);
