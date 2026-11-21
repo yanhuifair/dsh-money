@@ -281,7 +281,8 @@ function apply(ctx) {
     svg.appendChild(hub);
     // 刻度 0/6/12/18 在圆外
     const tickStyle = 'font-size:9px;fill:var(--dsw-alias-label-tertiary,#7a7a85);font-variant-numeric:tabular-nums;';
-    const ticks = [['12', CC, 6, 'middle'], ['03', 94, CC + 3, 'end'], ['06', CC, 96, 'middle'], ['09', 4, CC + 3, 'start']];
+    // 刻度按 24 小时制标注（15=15:00，位于 12 小时表盘的 3 点位置；09 与 21 同位）
+    const ticks = [['12', CC, 6, 'middle'], ['15', 94, CC + 3, 'end'], ['18', CC, 96, 'middle'], ['21', 4, CC + 3, 'start']];
     for (const [t, x, y, anchor] of ticks) {
       const txt = document.createElementNS(SVG, 'text');
       txt.setAttribute('x', String(x)); txt.setAttribute('y', String(y));
@@ -306,7 +307,7 @@ function apply(ctx) {
     el.appendChild(legend);
     const caption = document.createElement('div');
     caption.style.cssText = 'text-align:center;font-size:9px;line-height:12px;color:var(--dsw-alias-label-tertiary,#7a7a85);margin-bottom:2px;';
-    caption.textContent = '一圈 12 小时：下午时段按 12 小时制显示（14:00-18:00 即 02-06 位置）';
+    caption.textContent = '一圈 12 小时，刻度按 24 小时制（12=正午，15:00 在 3 点位置）';
     el.appendChild(caption);
   }
 
