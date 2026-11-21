@@ -183,6 +183,12 @@ function priceOf(
   return { hit: base.hit * k, miss: base.miss * k, out: base.out * k };
 }
 
+/** 本地/未计价模型的模拟单价：Flash 基准价（闲时价，无高峰翻倍） */
+function simPrice(currency: string): { hit: number; miss: number; out: number } | null {
+  const table = PRICES[currency] || PRICES.CNY;
+  return table['deepseek-flash'] || null;
+}
+
 /** 账单口径：未命中输入(含 cache write) x miss 价 + 命中 x hit 价 + 输出 x out 价 */
 function costOf(
   usage: Record<string, unknown>,
@@ -257,7 +263,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.5.6',
+        version: '1.6.0',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -402,17 +408,17 @@ export default class MoneyCostService extends TypertRemoteService {
   /** 会话折叠增量状态：记录最后处理的 seq，只折叠新增事件（key = sessionId + currency） */
   private foldCache = new Map<
     string,
-    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; days: Record<string, number>; lastSeq: number }
+    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null; days: Record<string, number>; lastSeq: number }
   >();
 
   /** 折叠会话：增量处理（只读新增事件并追加，避免重复遍历整个日志） */
   private async foldSession(
     sessionId: string,
     currency: 'CNY' | 'USD',
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; days: Record<string, number> }> {
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null; days: Record<string, number> }> {
     const key = sessionId + '::' + currency;
     const cached = this.foldCache.get(key);
-    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null, days: {} as Record<string, number> };
+    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null, simCost: null, days: {} as Record<string, number> };
     const sessionQuery = this.ctx.get('sessionQuery') as
       | { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> }
       | undefined;
@@ -423,7 +429,7 @@ export default class MoneyCostService extends TypertRemoteService {
       events = snap && Array.isArray(snap.events) ? (snap.events as Array<Record<string, unknown> & { seq?: number }>) : [];
     } catch (e) {
       return cached
-        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost, days: { ...cached.days } }
+        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost, simCost: cached.simCost, days: { ...cached.days } }
         : empty;
     }
     // 增量：从缓存的 lastSeq 之后继续；无缓存则全量
@@ -433,6 +439,7 @@ export default class MoneyCostService extends TypertRemoteService {
       conversationCost: cached ? cached.conversationCost : null,
       peakCost: cached ? cached.peakCost : null,
       offPeakCost: cached ? cached.offPeakCost : null,
+      simCost: cached ? cached.simCost : null,
     };
     // 只处理 seq > fromSeq 的新增事件
     const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number' ? e.seq > fromSeq : true)) : events;
@@ -444,6 +451,7 @@ export default class MoneyCostService extends TypertRemoteService {
       conversationCost: fold.conversationCost,
       peakCost: fold.peakCost,
       offPeakCost: fold.offPeakCost,
+      simCost: fold.simCost,
       days: daysOut,
       lastSeq: this.maxSeq(events),
     });
@@ -455,14 +463,16 @@ export default class MoneyCostService extends TypertRemoteService {
     events: Array<Record<string, unknown> & { seq?: number }>,
     currency: 'CNY' | 'USD',
     replies: MoneyReplyCost[],
-    carried: { conversationCost: number | null; peakCost: number | null; offPeakCost: number | null },
+    carried: { conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null },
     daysOut?: Record<string, number>,
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null }> {
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null }> {
     const timer = this.ctx.get('timer') as { timeout(ms: number): Promise<void> } | undefined;
     let lastModel = 'deepseek-flash';
     let total = carried.conversationCost ?? 0;
     let peakTotal = carried.peakCost ?? 0;
     let offPeakTotal = carried.offPeakCost ?? 0;
+    let simTotal = carried.simCost ?? 0;
+    let hasSim = carried.simCost != null;
     let hasCost = carried.conversationCost != null;
     let hasPeak = carried.peakCost != null;
     let hasOffPeak = carried.offPeakCost != null;
@@ -487,8 +497,20 @@ export default class MoneyCostService extends TypertRemoteService {
       const time = typeof ev.time === 'number' ? ev.time : Date.now();
       const peak = isPeak(time);
       const price = priceOf(model, time, currency);
-      const cost = costOf(usage, price);
-      if (cost != null) {
+      let cost = costOf(usage, price);
+      let sim = false;
+      if (cost == null && price == null) {
+        // 本地/未计价模型（如 Ollama）：按 Flash 基准价模拟，单独记账，
+        // 不进 API 总额、高峰/闲时分项与 7 天柱状图
+        const simCost = costOf(usage, simPrice(currency));
+        if (simCost != null) {
+          cost = simCost;
+          sim = true;
+          simTotal += simCost;
+          hasSim = true;
+        }
+      }
+      if (cost != null && !sim) {
         total += cost;
         hasCost = true;
         if (peak) {
@@ -508,7 +530,8 @@ export default class MoneyCostService extends TypertRemoteService {
         messageId: typeof message.id === 'string' ? message.id : null,
         cost,
         model,
-        peak,
+        peak: sim ? false : peak,
+        sim,
         tokens: {
           input: num(usage.inputTokens),
           cacheRead: num(usage.cacheReadTokens),
@@ -522,6 +545,7 @@ export default class MoneyCostService extends TypertRemoteService {
       conversationCost: hasCost ? total : null,
       peakCost: hasPeak ? peakTotal : null,
       offPeakCost: hasOffPeak ? offPeakTotal : null,
+      simCost: hasSim ? simTotal : null,
     };
   }
 
@@ -555,6 +579,8 @@ export default class MoneyCostService extends TypertRemoteService {
       let hasCost = false;
       let hasPeak = false;
       let hasOffPeak = false;
+      let simTotal = 0;
+      let hasSim = false;
       for (const sid of sessionIds) {
         const fold = await this.foldSession(sid, currency);
         for (const [dayKey, dayCost] of Object.entries(fold.days)) {
@@ -572,6 +598,10 @@ export default class MoneyCostService extends TypertRemoteService {
           offPeakTotal += fold.offPeakCost;
           hasOffPeak = true;
         }
+        if (fold.simCost != null) {
+          simTotal += fold.simCost;
+          hasSim = true;
+        }
       }
       workspaces.push({
         id: typeof w.id === 'string' ? w.id : '',
@@ -579,6 +609,7 @@ export default class MoneyCostService extends TypertRemoteService {
         cost: hasCost ? total : null,
         peakCost: hasPeak ? peakTotal : null,
         offPeakCost: hasOffPeak ? offPeakTotal : null,
+        simCost: hasSim ? simTotal : null,
         sessionCount: sessionIds.length,
       });
     }
@@ -635,6 +666,7 @@ export default class MoneyCostService extends TypertRemoteService {
       conversationCost: fold.conversationCost,
       peakCost: fold.peakCost,
       offPeakCost: fold.offPeakCost,
+      simCost: fold.simCost,
       lastReplyCost: last ? last.cost : null,
       period: currentPeriod(),
       replies: fold.replies.map((r) => ({
@@ -642,6 +674,7 @@ export default class MoneyCostService extends TypertRemoteService {
         cost: r.cost,
         model: r.model,
         peak: r.peak,
+        sim: r.sim,
         tokens: r.tokens,
       })),
     };

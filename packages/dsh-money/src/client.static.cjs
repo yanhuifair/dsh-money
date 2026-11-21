@@ -530,9 +530,11 @@ function apply(ctx) {
   function replyTooltip(r, currency) {
     if (!r) return '本次回复费用';
     const sym = moneySymbol(currency);
-    const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，估算）' : '（美元，估算）')];
+    const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，模拟）' : '（美元，模拟）')];
     if (r.model) lines.push('模型: ' + r.model);
-    lines.push('计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时'));
+    lines.push(r.sim
+      ? '本地模型：按 Flash 基准价模拟，不计入 API 消费'
+      : '计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时'));
     if (r.tokens) {
       lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
       lines.push('输入(缓存命中): ' + fmtTokens(r.tokens.cacheRead));
@@ -542,14 +544,34 @@ function apply(ctx) {
     return lines.join('\n');
   }
 
-  /** 细节明细：本对话总额 + 高峰/闲时分别合计（含条数） */
+/** API + 本地模拟的展示总额；两者都无数据时 null */
+  function grandTotal(o) {
+    const api = typeof o.conversationCost === 'number' ? o.conversationCost : null;
+    const sim = typeof o.simCost === 'number' && o.simCost > 0 ? o.simCost : 0;
+    if (api == null && !sim) return null;
+    return (api || 0) + sim;
+  }
+
+  /** 细节明细：本对话总额 + 高峰/闲时分别合计（含条数）+ 本地模拟（如有） */
   function conversationTooltip(o, currency) {
-    const lines = ['本对话累计费用（估算）: ' + fmtMoney(o.conversationCost, currency)];
+    const lines = ['本对话累计费用（估算）: ' + fmtMoney(grandTotal(o), currency)];
     const replies = Array.isArray(o.replies) ? o.replies : [];
     let peakCount = 0;
-    for (const r of replies) { if (r && r.peak) peakCount += 1; }
-    lines.push('高峰合计: ' + fmtMoney(o.peakCost == null ? 0 : o.peakCost, currency) + '（' + peakCount + ' 条）');
-    lines.push('闲时合计: ' + fmtMoney(o.offPeakCost == null ? 0 : o.offPeakCost, currency) + '（' + (replies.length - peakCount) + ' 条）');
+    let simCount = 0;
+    for (const r of replies) {
+      if (r && r.peak) peakCount += 1;
+      if (r && r.sim) simCount += 1;
+    }
+    const apiCount = replies.length - simCount;
+    if (typeof o.simCost === 'number' && o.simCost > 0) {
+      lines.push('API 消费: ' + fmtMoney(o.conversationCost == null ? 0 : o.conversationCost, currency) + '（' + apiCount + ' 条）');
+      lines.push('本地模型模拟: ' + fmtMoney(o.simCost, currency) + '（' + simCount + ' 条，不计入 API 消费）');
+      lines.push('高峰合计: ' + fmtMoney(o.peakCost == null ? 0 : o.peakCost, currency) + '（' + peakCount + ' 条）');
+      lines.push('闲时合计: ' + fmtMoney(o.offPeakCost == null ? 0 : o.offPeakCost, currency) + '（' + Math.max(0, apiCount - peakCount) + ' 条）');
+    } else {
+      lines.push('高峰合计: ' + fmtMoney(o.peakCost == null ? 0 : o.peakCost, currency) + '（' + peakCount + ' 条）');
+      lines.push('闲时合计: ' + fmtMoney(o.offPeakCost == null ? 0 : o.offPeakCost, currency) + '（' + apiCount + ' 条）');
+    }
     return lines.join('\n');
   }
 
@@ -578,7 +600,7 @@ function apply(ctx) {
         style: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
       },
         '本对话 ',
-        React.createElement('span', { style: badgeStyle }, fmtMoney(o.conversationCost, currency)),
+        React.createElement('span', { style: badgeStyle }, fmtMoney(grandTotal(o), currency)),
       ),
     );
   }
@@ -606,7 +628,7 @@ function apply(ctx) {
       'aria-label': '本次回复费用（估算）',
       ...tipProps(replyTooltip(reply, currency)),
       style: { ...badgeStyle, marginLeft: '4px', marginRight: '2px' },
-    }, fmtMoney(reply.cost, currency));
+    }, (reply.sim ? '模拟 ' : '') + fmtMoney(reply.cost, currency));
   }
 
   // ---- 侧边栏底部余额（sidebar.footer.action Slot）----
@@ -718,12 +740,16 @@ function apply(ctx) {
         const id = key.slice('workspace:'.length);
         const entry = byId.get(id);
         let badge = row.querySelector('.dsh-money-ws-badge');
-        if (!entry || entry.cost == null) {
+        const sim = typeof entry.simCost === 'number' && entry.simCost > 0 ? entry.simCost : 0;
+        const total = entry && entry.cost != null ? entry.cost + sim : (sim || null);
+        if (!entry || total == null) {
           if (badge) badge.remove();
           continue;
         }
-        const text = fmtMoney(entry.cost, wsTable.currency);
-        const tip = '工作区「' + (entry.title || id) + '」总费用: ' + text + '（估算）'
+        const text = fmtMoney(total, wsTable.currency);
+        let tip = '工作区「' + (entry.title || id) + '」总费用: ' + text + '（估算）'
+          + (entry.cost != null ? '\nAPI 消费: ' + fmtMoney(entry.cost, wsTable.currency) : '')
+          + (sim > 0 ? '\n本地模型模拟: ' + fmtMoney(sim, wsTable.currency) + '（不计入 API 消费）' : '')
           + '\n高峰合计: ' + fmtMoney(entry.peakCost == null ? 0 : entry.peakCost, wsTable.currency)
           + '\n闲时合计: ' + fmtMoney(entry.offPeakCost == null ? 0 : entry.offPeakCost, wsTable.currency)
           + '\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);

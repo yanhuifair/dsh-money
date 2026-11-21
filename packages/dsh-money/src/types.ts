@@ -41,6 +41,8 @@ export interface MoneyReplyCost {
   model: string;
   /** 该条回复发生时段是否为高峰（单价 ×2） */
   peak: boolean;
+  /** 本地/未计价模型：cost 为模拟值（Flash 基准价），不计入 API 消费 */
+  sim: boolean;
   tokens: MoneyTokens;
 }
 
@@ -49,6 +51,8 @@ export interface MoneyCostOverview {
   currency: string;
   balance: MoneyBalanceInfo | null;
   conversationCost: number | null;
+  /** 本地模型模拟费用合计（不计入 API 消费/7 天柱状图） */
+  simCost: number | null;
   /** 高峰时段部分的费用合计 */
   peakCost: number | null;
   /** 闲时部分的费用合计 */
@@ -70,6 +74,8 @@ export interface MoneyWorkspaceCost {
   id: string;
   title: string;
   cost: number | null;
+  /** 本地模型模拟费用合计（不计入 API 消费） */
+  simCost: number | null;
   /** 高峰时段部分的费用合计 */
   peakCost: number | null;
   /** 闲时部分的费用合计 */
