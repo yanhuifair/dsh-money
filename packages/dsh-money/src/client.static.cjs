@@ -220,47 +220,47 @@ function apply(ctx) {
     el.appendChild(wrap);
   }
 
-  /** 当天时刻盘（SVG 实心饼，12 小时制一圈）：12 点正上方顺时针，一格一小时；
-   *  闲时整圆绿底，高峰窗口（14-18 点即 2-6 点位置）画橙色扇区，指针指向当前时刻 */
+  /** 当天时刻盘（SVG 实心饼，标准 12 小时钟面）：12 在正上方顺时针 1-11，
+   *  每小时一个刻度与数字；闲时整圆绿底，高峰窗口橙色扇区，指针指向当前时刻 */
   function renderClock(el, clock) {
     const SVG = 'http://www.w3.org/2000/svg';
-    const C = 44, R = 42;
+    const CC = 62, R = 44; // viewBox 124×124，圆心 (62,62)，饼半径 44，外圈留给刻度与数字
     const GREEN = 'rgba(63,185,80,0.75)';
     const ORANGE = 'rgba(255,143,31,0.9)';
-    // 小时 → 坐标（0 点在正上方，顺时针）
-    const CC = C + 5; // 圆心（画布 98，四周留刻度位）
-    // 12 小时制：12 点（或 0 点）在正上方，顺时针
+    const TICK = 'var(--dsw-alias-label-tertiary,#7a7a85)';
+    // 12 小时钟面：12（=0）点在正上方，顺时针；hour12 取 0-12
     const pt = (hour12, r) => {
       const a = (hour12 / 12) * Math.PI * 2 - Math.PI / 2;
       return [CC + r * Math.cos(a), CC + r * Math.sin(a)];
     };
     const svg = document.createElementNS(SVG, 'svg');
     svg.setAttribute('data-dsh-money-clock', '');
-    svg.setAttribute('width', '98');
-    svg.setAttribute('height', '98');
-    svg.setAttribute('viewBox', '0 0 98 98');
-    svg.style.cssText = 'display:block;margin:10px auto 2px;overflow:visible;';
+    svg.setAttribute('width', '116');
+    svg.setAttribute('height', '116');
+    svg.setAttribute('viewBox', '0 0 124 124');
+    svg.style.cssText = 'display:block;margin:10px auto 2px;';
     const base = document.createElementNS(SVG, 'circle');
     base.setAttribute('cx', String(CC)); base.setAttribute('cy', String(CC));
     base.setAttribute('r', String(R)); base.setAttribute('fill', GREEN);
     svg.appendChild(base);
+    // 高峰扇区：24h 窗口按 [0,12)/[12,24) 拆段映射到钟面（14:00-18:00 → 2-6）
     const windows = Array.isArray(clock.windows) ? clock.windows.slice().sort((a, b) => a[0] - b[0]) : [];
-    const slices = []; // 跨 12/24 点的窗口拆成表盘上的多段
+    const slices = [];
     for (const w of windows) {
       const st = Math.max(0, Math.min(24, w[0]));
       const en = Math.max(0, Math.min(24, w[1]));
-      for (const base of [0, 12]) {
-        const cs = Math.max(st, base);
-        const ce = Math.min(en, base + 12);
-        if (ce > cs) slices.push([cs - base, ce - base]);
+      for (const bnd of [0, 12]) {
+        const cs = Math.max(st, bnd);
+        const ce = Math.min(en, bnd + 12);
+        if (ce > cs) slices.push([cs - bnd, ce - bnd]);
       }
     }
     for (const [st, en] of slices) {
       const [x1, y1] = pt(st, R);
       const [x2, y2] = pt(en, R);
       const large = en - st > 6 ? 1 : 0;
-      const path = document.createElementNS(SVG, 'path');
       const cc = String(CC);
+      const path = document.createElementNS(SVG, 'path');
       path.setAttribute('d',
         'M' + cc + ',' + cc +
         ' L' + x1.toFixed(2) + ',' + y1.toFixed(2) +
@@ -268,7 +268,29 @@ function apply(ctx) {
       path.setAttribute('fill', ORANGE);
       svg.appendChild(path);
     }
-    // 指针：圆心指向当前时刻
+    // 每小时刻度（12 个）
+    for (let h = 1; h <= 12; h++) {
+      const [x1, y1] = pt(h === 12 ? 0 : h, R + 1.5);
+      const [x2, y2] = pt(h === 12 ? 0 : h, R + 5);
+      const tick = document.createElementNS(SVG, 'line');
+      tick.setAttribute('x1', x1.toFixed(2)); tick.setAttribute('y1', y1.toFixed(2));
+      tick.setAttribute('x2', x2.toFixed(2)); tick.setAttribute('y2', y2.toFixed(2));
+      tick.setAttribute('stroke', TICK);
+      tick.setAttribute('stroke-width', '1');
+      svg.appendChild(tick);
+    }
+    // 每小时数字 1-12（12 在正上方）
+    for (let h = 1; h <= 12; h++) {
+      const [x, y] = pt(h === 12 ? 0 : h, R + 12);
+      const txt = document.createElementNS(SVG, 'text');
+      txt.setAttribute('x', x.toFixed(2)); txt.setAttribute('y', y.toFixed(2));
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('dominant-baseline', 'central');
+      txt.setAttribute('style', 'font-size:8.5px;fill:' + TICK + ';font-variant-numeric:tabular-nums;');
+      txt.textContent = String(h);
+      svg.appendChild(txt);
+    }
+    // 指针：圆心指向当前时刻（12 小时制）
     const DAY = 24 * 3600 * 1000;
     const now = typeof clock.now === 'number' ? clock.now : Date.now();
     const hour = Math.max(0, Math.min(24, (now - clock.midnight) / DAY * 24)) % 12;
@@ -285,18 +307,6 @@ function apply(ctx) {
     hub.setAttribute('r', '2.5');
     hub.setAttribute('fill', 'var(--dsw-alias-label-primary,#f5f5f5)');
     svg.appendChild(hub);
-    // 刻度 0/6/12/18 在圆外
-    const tickStyle = 'font-size:9px;fill:var(--dsw-alias-label-tertiary,#7a7a85);font-variant-numeric:tabular-nums;';
-    // 刻度按 24 小时制标注（15=15:00，位于 12 小时表盘的 3 点位置；09 与 21 同位）
-    const ticks = [['12', CC, 6, 'middle'], ['15', 94, CC + 3, 'end'], ['18', CC, 96, 'middle'], ['21', 4, CC + 3, 'start']];
-    for (const [t, x, y, anchor] of ticks) {
-      const txt = document.createElementNS(SVG, 'text');
-      txt.setAttribute('x', String(x)); txt.setAttribute('y', String(y));
-      txt.setAttribute('text-anchor', anchor);
-      txt.setAttribute('style', tickStyle);
-      txt.textContent = String(t);
-      svg.appendChild(txt);
-    }
     el.appendChild(svg);
     // 图例
     const legend = document.createElement('div');
@@ -313,7 +323,7 @@ function apply(ctx) {
     el.appendChild(legend);
     const caption = document.createElement('div');
     caption.style.cssText = 'text-align:center;font-size:9px;line-height:12px;color:var(--dsw-alias-label-tertiary,#7a7a85);margin-bottom:2px;';
-    caption.textContent = '一圈 12 小时，刻度按 24 小时制（12=正午，15:00 在 3 点位置）';
+    caption.textContent = '12 小时钟面：下午高峰 14:00-18:00 在 2-6 点位置';
     el.appendChild(caption);
   }
 
