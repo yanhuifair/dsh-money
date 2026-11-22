@@ -183,6 +183,11 @@ function priceOf(
   return { hit: base.hit * k, miss: base.miss * k, out: base.out * k };
 }
 
+/** 费用内部计算精度：保留小数点后 8 位（显示层再取 2 位） */
+function roundCost(x: number): number {
+  return Math.round(x * 1e8) / 1e8;
+}
+
 /** 本地/未计价模型的模拟单价：与 DeepSeek API 同规则——Flash 档价格 + 同时段高峰 ×2 */
 function simPrice(currency: string, ms: number): { hit: number; miss: number; out: number } | null {
   return priceOf('deepseek-flash', ms, currency);
@@ -198,7 +203,7 @@ function costOf(
   const input = num(usage.inputTokens) + num(usage.cacheWriteTokens);
   const hit = num(usage.cacheReadTokens);
   const out = num(usage.outputTokens);
-  return (input * price.miss + hit * price.hit + out * price.out) / 1e6;
+  return roundCost((input * price.miss + hit * price.hit + out * price.out) / 1e6);
 }
 
 /** 从 settings 描述里按 provider.settingsPath 取当前值 */
@@ -262,7 +267,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.6.4',
+        version: '1.7.0',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -541,10 +546,10 @@ export default class MoneyCostService extends TypertRemoteService {
     }
     return {
       replies,
-      conversationCost: hasCost ? total : null,
-      peakCost: hasPeak ? peakTotal : null,
-      offPeakCost: hasOffPeak ? offPeakTotal : null,
-      simCost: hasSim ? simTotal : null,
+      conversationCost: hasCost ? roundCost(total) : null,
+      peakCost: hasPeak ? roundCost(peakTotal) : null,
+      offPeakCost: hasOffPeak ? roundCost(offPeakTotal) : null,
+      simCost: hasSim ? roundCost(simTotal) : null,
     };
   }
 
@@ -605,10 +610,10 @@ export default class MoneyCostService extends TypertRemoteService {
       workspaces.push({
         id: typeof w.id === 'string' ? w.id : '',
         title: typeof w.title === 'string' ? w.title : '',
-        cost: hasCost ? total : null,
-        peakCost: hasPeak ? peakTotal : null,
-        offPeakCost: hasOffPeak ? offPeakTotal : null,
-        simCost: hasSim ? simTotal : null,
+        cost: hasCost ? roundCost(total) : null,
+        peakCost: hasPeak ? roundCost(peakTotal) : null,
+        offPeakCost: hasOffPeak ? roundCost(offPeakTotal) : null,
+        simCost: hasSim ? roundCost(simTotal) : null,
         sessionCount: sessionIds.length,
       });
     }
@@ -618,7 +623,7 @@ export default class MoneyCostService extends TypertRemoteService {
     for (let i = 0; i < 7; i++) {
       const dayKey = dayKeyBeijing(now - i * DAY_MS);
       const mmdd = dayKey.slice(5);
-      days.push({ date: mmdd, cost: Math.round((dayTotals[dayKey] || 0) * 1e6) / 1e6 });
+      days.push({ date: mmdd, cost: roundCost(dayTotals[dayKey] || 0) });
     }
     return { workspaces, days };
   }

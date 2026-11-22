@@ -167,11 +167,9 @@ function apply(ctx) {
     return tipEl;
   }
 
-  /** 图表数值：0 显示 0；≥1 一位小数；<1 两位小数（去尾零） */
+  /** 图表数值：统一两位小数（显示口径） */
   function fmtChartValue(cost) {
-    if (!cost) return '0';
-    const v = cost >= 1 ? cost.toFixed(1) : cost.toFixed(2);
-    return v.replace(/\.?0+$/, '');
+    return (Number.isFinite(cost) ? cost : 0).toFixed(2);
   }
 
   /** 近 7 天柱状图：金色柱、底部细基线、上数值下日期（原生弹窗内嵌图表风格） */
@@ -518,10 +516,8 @@ function apply(ctx) {
   function fmtMoney(v, currency) {
     if (v == null || !Number.isFinite(v)) return '—';
     const sym = moneySymbol(currency);
-    if (v === 0) return '~' + sym + '0.00';
-    if (v >= 1) return '~' + sym + v.toFixed(2);
-    if (v >= 0.01) return '~' + sym + v.toFixed(4);
-    return '~' + sym + v.toFixed(6).replace(/0+$/, '');
+    // 显示统一两位小数（内部计算保留 8 位精度）
+    return '~' + sym + v.toFixed(2);
   }
   function fmtBalance(b) {
     if (!b || b.total == null || !Number.isFinite(b.total)) return '—';
