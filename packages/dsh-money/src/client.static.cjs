@@ -895,7 +895,7 @@ function apply(ctx) {
       const sym = balance && balance.currency === 'USD' ? '$' : '¥';
       return React.createElement('span', { 'aria-label': '账号剩余金额', ...tipProps(tip), style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
     }
-    const money = React.createElement('span', { key: 'money', 'aria-label': '账号剩余金额', ...tipProps(tip), style: badgeStyle }, amount);
+    const money = React.createElement('span', { key: 'money', 'aria-label': '账号剩余金额', ...tipProps(tip), style: badgeStyle }, '余额 ' + amount);
     // 本地模型模拟消费徽章（白色）：汇总各工作区 simCost，点击看说明
     let simTotal = 0;
     if (wsTable && Array.isArray(wsTable.workspaces)) {
