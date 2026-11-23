@@ -628,6 +628,15 @@ function apply(ctx) {
     });
   }
 
+  /** 高峰徽章倒计时：距下次切换（进入闲时）的整分钟数，如「 97分」；非高峰/缺数据为空 */
+  function peakCountdownLabel(period, now) {
+    if (!period || !period.peak) return '';
+    const next = period.nextChangeAt;
+    if (typeof next !== 'number' || !Number.isFinite(next)) return '';
+    const mins = Math.max(0, Math.ceil((next - now) / 60000));
+    return ' ' + mins + '分';
+  }
+
   function periodLabel(period) {
     return period && period.peak ? '高峰' : '闲时';
   }
@@ -908,10 +917,10 @@ function apply(ctx) {
     const period = balancePeriod
       ? React.createElement('span', {
         key: 'period',
-        'aria-label': periodLabel(balancePeriod) + '时段',
+        'aria-label': periodLabel(balancePeriod) + '时段' + peakCountdownLabel(balancePeriod, Date.now()),
         ...tipProps(periodTooltip(balancePeriod, wsTable && wsTable.currency ? wsTable.currency : 'CNY')),
         style: { ...periodBadgeStyle(balancePeriod.peak), marginLeft: '4px' },
-      }, periodLabel(balancePeriod))
+      }, periodLabel(balancePeriod) + peakCountdownLabel(balancePeriod, Date.now()))
       : null;
     return React.createElement('span', {
       style: { display: 'inline-flex', alignItems: 'center', gap: '4px' },
@@ -1039,9 +1048,13 @@ function apply(ctx) {
       ctx.effect(() => () => { if (badgeTimer) { clearTimeout(badgeTimer); badgeTimer = null; } });
     }
     ctx.effect(() => () => { if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; } });
+    // 高峰徽章倒计时的分钟级刷新：只驱动重渲染，数据到达另有 60 秒轮询与切换点定时器
+    const disposeMinute = ctx.interval(() => {
+      for (const fn of Array.from(balanceListeners)) { try { fn(balance); } catch (e) {} }
+    }, 60000);
     const disposeWs = ctx.interval(() => loadWsTable(), 60000);
     const disposeBalance = ctx.interval(() => loadBalance(), 60000);
-    ctx.effect(() => () => { disposeWs(); disposeBalance(); });
+    ctx.effect(() => () => { disposeWs(); disposeBalance(); disposeMinute(); });
   }
 
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {

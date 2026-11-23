@@ -51,7 +51,7 @@ let src = fs.readFileSync(SRC, 'utf8');
 // tip 函数定义在 apply(ctx) 作用域内（函数声明提升）：在 apply 首部注入钩子取出
 const ANCHOR = '  startSidebarObserver();\n}';
 if (!src.includes(ANCHOR)) { console.error('FAIL: apply 结尾锚点丢失，测试需随源码更新'); process.exit(1); }
-src = src.replace(ANCHOR, '  __DSH_MONEY_TEST_HOOK__ && __DSH_MONEY_TEST_HOOK__({ ensureTip, renderTip, periodTooltip, tipKey, replyTooltip, conversationTooltip, simTip, simStatsOf, fmtTokShort });\n' + ANCHOR);
+src = src.replace(ANCHOR, '  __DSH_MONEY_TEST_HOOK__ && __DSH_MONEY_TEST_HOOK__({ ensureTip, renderTip, periodTooltip, tipKey, replyTooltip, conversationTooltip, simTip, simStatsOf, fmtTokShort, peakCountdownLabel });\n' + ANCHOR);
 let tip = null;
 const moduleObj = { exports: {} };
 vm.runInNewContext(src + "\nmodule.exports.apply({ remote: { moneyCost: { overview: async () => ({}), balance: async () => ({}), workspacesAll: async () => ({}), config: async () => ({}) } }, slots: { inject() { return () => {}; } }, effect: (fn) => { try { fn(); } catch (e) {} }, interval: () => 0, timeout: async () => {}, get: () => undefined, timer: { setInterval: () => 0, clearInterval: () => {} } });", {
@@ -206,6 +206,14 @@ const convPeak = tip.conversationTooltip({ conversationCost: 1, peakCost: 1, off
   { messageId: 'p1', cost: 1, sim: false, peak: true }, { messageId: 'p2', cost: 1, sim: true, peak: true },
 ] }, 'CNY');
 assert(convPeak.includes('高峰合计: ~¥ 1.00（1 条）'), '高峰条数只算 API 回复');
+
+// ---------- 高峰倒计时 ----------
+const t0 = 1780000000000;
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 97.2 * 60000 }, t0) === ' 98分', '高峰剩余向上取整分钟');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 2 * 3600000 }, t0) === ' 120分', '2 小时=120 分');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 - 5000 }, t0) === ' 0分', '已过切换点钳到 0 分');
+assert(tip.peakCountdownLabel({ peak: false, nextChangeAt: t0 + 3600000 }, t0) === '', '闲时无倒计时');
+assert(tip.peakCountdownLabel({ peak: true }, t0) === '' && tip.peakCountdownLabel(null, t0) === '', '缺数据返回空');
 
 console.log('\n' + pass + ' PASS, ' + fail + ' FAIL');
 process.exit(fail ? 1 : 0);
