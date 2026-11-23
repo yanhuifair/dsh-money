@@ -108,8 +108,10 @@ assert(tipOff.table.rows[4].group === 'deepseek-v4-pro', '第二组标题 deepse
 assert(tipOff.table.rows[7].join(',') === '输出,13.5,27', 'pro 输出 13.5 → 27');
 assert(!tipOff.lines.some((l) => l.includes('三档单价') || l.includes('当前为闲时（')), '长句标题/规则行已拆出');
 assert(tipOff.lines[0] === '当前计费时段：闲时', '闲时短标题（左标签右数值）');
+assert(tipOff.titleColor === '#3fb950', '闲时标题数值=闲时徽章绿');
 const tipPeak = tip.periodTooltip(periodOf(true), 'CNY');
 assert(tipPeak.lines[0] === '当前计费时段：高峰', '高峰短标题');
+assert(tipPeak.titleColor === '#ff8f1f', '高峰标题数值=高峰徽章橙');
 const tipUsd = tip.periodTooltip({ ...periodOf(false), prices: [{ model: 'deepseek-flash', hit: 0.003, miss: 0.15, out: 0.6 }] }, 'USD');
 assert(tipUsd.table.note[0].includes('美元'), 'USD 单位');
 assert(tipUsd.table.rows[1].join(',') === '缓存命中,0.003,0.006', 'USD flash 命中 0.003 → 0.006');
@@ -131,6 +133,8 @@ const groupCells = dfs(tableWrap, (n) => (n.style.cssText || '').includes('grid-
 assert(groupCells.length === 1, '模型组标题占整行（grid-column:1 / -1）');
 assert(dfs(tableWrap, (n) => textOf(n) === 'deepseek-flash 缓存命中').length === 0, '模型名不再重复出现在档位行');
 const children = tipEl.children;
+const titleVal = dfs(tipEl, (n) => n.tag === 'span' && textOf(n) === '闲时' && (n.style.color || '') === '#3fb950');
+assert(titleVal.length >= 1, 'DOM：闲时数值已染徽章绿');
 const iTable = children.findIndex((c) => c.attrs && c.attrs['data-dsh-money-table'] !== undefined);
 const iSvg = children.findIndex((c) => c.tag === 'svg');
 assert(iTable > -1 && iSvg > -1 && iSvg < iTable, '时刻盘在前、价目表收尾');

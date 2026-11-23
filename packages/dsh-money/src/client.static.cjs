@@ -461,6 +461,7 @@ function apply(ctx) {
       tl.textContent = tm[1];
       const tv = document.createElement('span');
       tv.style.cssText = 'font-variant-numeric:tabular-nums;white-space:nowrap;';
+      if (spec.titleColor) tv.style.color = spec.titleColor;
       tv.textContent = tm[2];
       title.appendChild(tl);
       title.appendChild(tv);
@@ -622,7 +623,7 @@ function apply(ctx) {
     const lines = period.peak
       ? ['当前计费时段：高峰', '本次高峰：' + since + ' 起', '下次切换：' + next + ' 起为闲时']
       : ['当前计费时段：闲时', '本次闲时：' + since + ' 起', '下次切换：' + next + ' 起为高峰'];
-    const out = { lines: lines.slice() };
+    const out = { lines: lines.slice(), titleColor: period.peak ? '#ff8f1f' : '#3fb950' };
     // 当天时刻盘（host 1.5.2+ 提供 dayMidnightAt / dayPeakWindows）
     if (typeof period.dayMidnightAt === 'number' && Array.isArray(period.dayPeakWindows)) {
       const wins = period.dayPeakWindows;
