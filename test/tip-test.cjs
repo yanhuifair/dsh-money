@@ -51,7 +51,7 @@ let src = fs.readFileSync(SRC, 'utf8');
 // tip 函数定义在 apply(ctx) 作用域内（函数声明提升）：在 apply 首部注入钩子取出
 const ANCHOR = '  startSidebarObserver();\n}';
 if (!src.includes(ANCHOR)) { console.error('FAIL: apply 结尾锚点丢失，测试需随源码更新'); process.exit(1); }
-src = src.replace(ANCHOR, '  __DSH_MONEY_TEST_HOOK__ && __DSH_MONEY_TEST_HOOK__({ ensureTip, renderTip, periodTooltip, tipKey });\n' + ANCHOR);
+src = src.replace(ANCHOR, '  __DSH_MONEY_TEST_HOOK__ && __DSH_MONEY_TEST_HOOK__({ ensureTip, renderTip, periodTooltip, tipKey, replyTooltip, conversationTooltip });\n' + ANCHOR);
 let tip = null;
 const moduleObj = { exports: {} };
 vm.runInNewContext(src + "\nmodule.exports.apply({ remote: { moneyCost: { overview: async () => ({}), balance: async () => ({}), workspacesAll: async () => ({}), config: async () => ({}) } }, slots: { inject() { return () => {}; } }, effect: (fn) => { try { fn(); } catch (e) {} }, interval: () => 0, timeout: async () => {}, get: () => undefined, timer: { setInterval: () => 0, clearInterval: () => {} } });", {
@@ -138,6 +138,32 @@ assert(tipEl.children[0].textContent === '当前计费时段：' || (tipEl.child
 assert(!!dfs(tipEl, (n) => n.tag === 'svg')[0], '时刻盘仍渲染');
 tip.renderTip('纯字符串 tip');
 assert(dfs(tipEl, (n) => n.attrs && n.attrs['data-dsh-money-table'] !== undefined).length === 0, '字符串 tip 不带表格');
+
+// ---------- 回复弹窗 ----------
+const repSim = tip.replyTooltip({ cost: 0.011077, model: 'deepseek-flash', sim: true, tokens: { input: 10337, cacheRead: 0, cacheWrite: 0, output: 185 } }, 'CNY');
+assert(repSim.split('\n')[0] === '本次回复费用: ~¥ 0.01', '回复标题短格式（旧「（元，模拟）」后缀已移除）');
+assert(!repSim.includes('模拟'), '回复弹窗无「模拟」旧文案');
+assert(repSim.includes('本地模型：无 API 账单'), 'sim 回复有本地口径说明');
+assert(!repSim.includes('缓存命中:') && !repSim.includes('缓存写入:'), '0 值缓存行省略');
+assert(repSim.includes('未命中输入: 10.3K token') && repSim.includes('输出: 185 token'), '非 0 token 行保留');
+assert(repSim.endsWith('元，按官方价目估算，不代表最终账单'), '回复底部灰注释');
+const repPeak = tip.replyTooltip({ cost: 2.5, model: 'deepseek-v4-pro', sim: false, peak: true, tokens: { input: 100, cacheRead: 492928, cacheWrite: 0, output: 2000 } }, 'CNY');
+assert(repPeak.includes('计价时段: 高峰（单价 ×2）'), 'API 回复高峰时段行');
+assert(repPeak.includes('缓存命中: 492.9K token'), '非 0 缓存命中显示');
+assert(!repPeak.includes('闲时:'), '闲时行不混入');
+const repUsd = tip.replyTooltip({ cost: 0.5, model: 'deepseek-flash', sim: false, peak: false, tokens: { input: 1, cacheRead: 0, cacheWrite: 0, output: 1 } }, 'USD');
+assert(repUsd.endsWith('美元，按官方价目估算，不代表最终账单'), 'USD 单位注释');
+
+// ---------- 本对话弹窗 ----------
+const conv1 = tip.conversationTooltip({ conversationCost: 8.7188, peakCost: 2.125, offPeakCost: 6.5938, replies: [
+  { messageId: 'm1', cost: 8.7188, sim: false, peak: true }, { messageId: 'm2', cost: 2.5, sim: true },
+] }, 'CNY');
+assert(conv1.split('\n')[0] === '本对话累计费用: ~¥ 8.72', '对话标题短格式（无「（估算）」）');
+assert(conv1.includes('高峰合计: ~¥ 2.13（1 条）'), '高峰分项含条数');
+assert(conv1.includes('本地模型消费以白色徽章单独显示'), '有 sim 时提示白徽章分流');
+assert(conv1.endsWith('元，按官方价目估算，不代表最终账单'), '对话底部灰注释');
+const conv2 = tip.conversationTooltip({ conversationCost: 8.7188, peakCost: 0, offPeakCost: 8.7188, replies: [{ messageId: 'm1', cost: 8.7188, sim: false }] }, 'CNY');
+assert(!conv2.includes('白色徽章'), '无 sim 时不出现白徽章提示');
 
 console.log('\n' + pass + ' PASS, ' + fail + ' FAIL');
 process.exit(fail ? 1 : 0);

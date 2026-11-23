@@ -98,6 +98,11 @@ function apply(ctx) {
   const GOLD = '#f0c11d';
   // 本地模型模拟徽章：独立于 API 计费徽章，白字，放 API 徽章右侧
   const simBadgeStyle = { color: 'var(--dsw-alias-label-primary,#f5f5f5)' };
+  /** 单位与估算口径的灰色注释行（无冒号，全宽展示） */
+  function moneyUnitNote(currency) {
+    return (currency === 'USD' ? '美元' : '元') + '，按官方价目估算，不代表最终账单';
+  }
+
   function simTip(total, count, currency) {
     const lines = ['本地模型消费: ' + fmtMoney(total, currency) + (count > 0 ? '（' + count + ' 条）' : '')];
     lines.push('本地模型无 API 账单，此金额按 DeepSeek API 规则（Flash 档，高峰 ×2）估算');
@@ -177,7 +182,7 @@ function apply(ctx) {
     const cur = chart.currency || 'CNY';
     const head = document.createElement('div');
     head.setAttribute('data-dsh-money-chart', '');
-    head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-top:10px;';
+    head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-top:12px;';
     const hl = document.createElement('span');
     hl.style.cssText = 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
     hl.textContent = '最近 7 天（估算）';
@@ -613,24 +618,25 @@ function apply(ctx) {
 
   function replyTooltip(r, currency) {
     if (!r) return '本次回复费用';
-    const sym = moneySymbol(currency);
-    const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency) + (currency === 'CNY' ? '（元，模拟）' : '（美元，模拟）')];
+    const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency)];
     if (r.model) lines.push('模型: ' + r.model);
     lines.push(r.sim
-      ? '本地模型无 API 账单：按 DeepSeek API 规则（Flash 档，高峰 ×2）估算，不计入 API 消费'
-      : '计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时'));
+      ? '本地模型：无 API 账单，按 DeepSeek API 规则（Flash 档，高峰 ×2）估算，不计入 API 消费'
+      : '计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时（基准价）'));
     if (r.tokens) {
-      lines.push('输入(未命中): ' + fmtTokens(r.tokens.input));
-      lines.push('输入(缓存命中): ' + fmtTokens(r.tokens.cacheRead));
-      lines.push('输入(缓存写入): ' + fmtTokens(r.tokens.cacheWrite));
-      lines.push('输出: ' + fmtTokens(r.tokens.output));
+      const t = r.tokens;
+      lines.push('未命中输入: ' + fmtTokens(t.input));
+      if (t.cacheRead > 0) lines.push('缓存命中: ' + fmtTokens(t.cacheRead));
+      if (t.cacheWrite > 0) lines.push('缓存写入: ' + fmtTokens(t.cacheWrite));
+      lines.push('输出: ' + fmtTokens(t.output));
     }
+    lines.push(moneyUnitNote(currency));
     return lines.join('\n');
   }
 
   /** API 计费徽章细节：本对话 API 总额 + 高峰/闲时分别合计（含条数） */
   function conversationTooltip(o, currency) {
-    const lines = ['本对话累计费用（估算）: ' + fmtMoney(o.conversationCost, currency)];
+    const lines = ['本对话累计费用: ' + fmtMoney(o.conversationCost, currency)];
     const replies = Array.isArray(o.replies) ? o.replies : [];
     let peakCount = 0;
     let simCount = 0;
@@ -641,6 +647,8 @@ function apply(ctx) {
     const apiCount = replies.length - simCount;
     lines.push('高峰合计: ' + fmtMoney(o.peakCost == null ? 0 : o.peakCost, currency) + '（' + peakCount + ' 条）');
     lines.push('闲时合计: ' + fmtMoney(o.offPeakCost == null ? 0 : o.offPeakCost, currency) + '（' + Math.max(0, apiCount - peakCount) + ' 条）');
+    if (simCount > 0) lines.push('本地模型消费以白色徽章单独显示，不计入此金额');
+    lines.push(moneyUnitNote(currency));
     return lines.join('\n');
   }
 
@@ -761,8 +769,10 @@ function apply(ctx) {
     const amount = fmtBalance(balance);
     const tipLines = ['账号剩余金额: ' + amount];
     if (balance && balance.source === 'api-key') tipLines.push('来源: API Key 余额');
+    tipLines.push('余额为实际值，每 60 秒自动刷新');
     let tip;
     if (wsDays && wsDays.length) {
+      tipLines.push('最近 7 天按北京时间自然日估算，不含本地模型消费');
       const cur = wsTable && wsTable.currency ? wsTable.currency : 'CNY';
       let week = 0;
       for (const d of wsDays) { if (d && typeof d.cost === 'number') week += d.cost; }
@@ -848,10 +858,11 @@ function apply(ctx) {
         let badge = row.querySelector('.dsh-money-ws-badge');
         const text = entry && entry.cost != null ? fmtMoney(entry.cost, wsTable.currency) : null;
         const tip = text == null ? null
-          : '工作区「' + (entry.title || id) + '」API 费用: ' + text + '（估算）'
+          : '工作区 API 费用: ' + text
             + '\n高峰合计: ' + fmtMoney(entry.peakCost == null ? 0 : entry.peakCost, wsTable.currency)
             + '\n闲时合计: ' + fmtMoney(entry.offPeakCost == null ? 0 : entry.offPeakCost, wsTable.currency)
-            + '\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0);
+            + '\n会话数: ' + (entry.sessionCount != null ? entry.sessionCount : 0)
+            + '\n「' + (entry.title || id) + '」· ' + moneyUnitNote(wsTable.currency);
         if (text == null) {
           if (badge) badge.remove();
         } else {
