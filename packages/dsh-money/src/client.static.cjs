@@ -211,7 +211,7 @@ function apply(ctx) {
       'box-sizing:border-box',
       'width:max-content',
       'min-width:min(300px,calc(100vw - 24px))',
-      'max-width:min(440px,calc(100vw - 24px))',
+      'max-width:min(600px,calc(100vw - 24px))',
       'max-height:calc(100vh - 24px)',
       'overflow:hidden auto',
       'padding:16px',
@@ -325,7 +325,7 @@ function apply(ctx) {
       row.forEach(function (cell, i) {
         const c = document.createElement('div');
         c.style.cssText = i
-          ? 'color:var(--dsw-alias-label-primary,#f5f5f5);text-align:right;font-variant-numeric:tabular-nums;'
+          ? 'color:var(--dsw-alias-label-primary,#f5f5f5);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;'
           : 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
         c.textContent = cell;
         grid.appendChild(c);
@@ -481,11 +481,11 @@ function apply(ctx) {
         const dd = document.createElement('div');
         if (m) {
           dt.style.cssText = 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
-          dd.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);text-align:right;overflow-wrap:anywhere;white-space:pre-line;font-variant-numeric:tabular-nums;';
+          dd.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);text-align:right;overflow-wrap:normal;white-space:pre-line;font-variant-numeric:tabular-nums;';
           dt.textContent = m[1];
           dd.textContent = m[2];
         } else {
-          dd.style.cssText = 'grid-column:1 / -1;color:var(--dsw-alias-label-secondary,#a0a0a8);white-space:pre-line;';
+          dd.style.cssText = 'grid-column:1 / -1;color:var(--dsw-alias-label-secondary,#a0a0a8);white-space:pre-line;overflow-wrap:normal;';
           dd.textContent = line;
           grid.appendChild(dd);
           continue;
