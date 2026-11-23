@@ -132,9 +132,15 @@ assert(dfs(tableWrap, (n) => textOf(n) === '13.5').length === 1 && dfs(tableWrap
 const groupCells = dfs(tableWrap, (n) => (n.style.cssText || '').includes('grid-column:1 / -1') && textOf(n) === 'deepseek-flash');
 assert(groupCells.length === 1, '模型组标题占整行（grid-column:1 / -1）');
 assert(dfs(tableWrap, (n) => textOf(n) === 'deepseek-flash 缓存命中').length === 0, '模型名不再重复出现在档位行');
-const dialBase = dfs(tipEl, (n) => n.tag === 'circle' && (n.attrs.fill || '') === '#3fb950');
-assert(dialBase.length >= 1, 'DOM：时刻盘整盘=闲时徽章绿 #3fb950');
-assert(dfs(tipEl, (n) => n.tag === 'path' && (n.attrs.fill || '') === '#ff8f1f').length >= 1, 'DOM：高峰扇区=高峰徽章橙 #ff8f1f');
+assert(dfs(tipEl, (n) => n.tag === 'rect' && (n.attrs.fill || '') === '#3fb950').length === 1, '时间条轨道=闲时徽章绿 #3fb950');
+assert(dfs(tipEl, (n) => n.tag === 'rect' && (n.attrs.fill || '') === '#ff8f1f').length === 2, '两个高峰窗口=高峰徽章橙 #ff8f1f');
+const clockSvg = dfs(tipEl, (n) => n.attrs && n.attrs['data-dsh-money-clock'] !== undefined)[0];
+assert(!!clockSvg, 'DOM：横轴时间条已渲染');
+assert((clockSvg.attrs.viewBox || '') === '0 0 360 46', '横轴 viewBox');
+const axisTexts = dfs(clockSvg, (n) => n.tag === 'text');
+assert(axisTexts.length === 25, '0..24 每小时一个数字');
+assert(axisTexts[0].textContent === '0' && axisTexts[24].textContent === '24', '两端为 0 与 24');
+assert(dfs(clockSvg, (n) => n.tag === 'line').length === 26, '25 刻度 + 1 当前时刻白线');
 const children = tipEl.children;
 const titleVal = dfs(tipEl, (n) => n.tag === 'span' && textOf(n) === '闲时' && (n.style.color || '') === '#3fb950');
 assert(titleVal.length >= 1, 'DOM：闲时数值已染徽章绿');
