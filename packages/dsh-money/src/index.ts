@@ -16,6 +16,7 @@
 import { Context, Service } from '@deepseek-ai/cordis';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type {
+  MoneyPeriod,
   MoneyBalanceInfo,
   MoneyBalanceResult,
   MoneyConfigResult,
@@ -142,9 +143,18 @@ function dayPeakWindows(midnightMs: number): number[][] {
 }
 
 /** 当前时段快照（高峰/闲时 + 本段起点 + 下次切换时间 + 今日时刻盘数据） */
-function currentPeriod(ms: number = Date.now()): { peak: boolean; since: number; nextChangeAt: number; dayMidnightAt: number; dayPeakWindows: number[][] } {
+function currentPeriod(currency: 'CNY' | 'USD' = 'CNY', ms: number = Date.now()): MoneyPeriod {
   const dayMidnight = Math.floor((ms + BEIJING_OFFSET_MS) / DAY_MS) * DAY_MS - BEIJING_OFFSET_MS;
-  return { peak: isPeak(ms), since: periodStart(ms), nextChangeAt: nextPeriodChange(ms), dayMidnightAt: dayMidnight, dayPeakWindows: dayPeakWindows(dayMidnight) };
+  const table = PRICES[currency] || PRICES.CNY;
+  return {
+    peak: isPeak(ms),
+    since: periodStart(ms),
+    nextChangeAt: nextPeriodChange(ms),
+    dayMidnightAt: dayMidnight,
+    dayPeakWindows: dayPeakWindows(dayMidnight),
+    // 闲时基准单价（当前显示币种）；高峰为 2 倍，由展示层换算
+    prices: Object.entries(table).map(([model, t]) => ({ model, hit: t.hit, miss: t.miss, out: t.out })),
+  };
 }
 
 /** 近 7 天全 0 占位（无注册表/读取失败时） */
@@ -267,7 +277,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.7.0',
+        version: '1.7.1',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -644,7 +654,7 @@ export default class MoneyCostService extends TypertRemoteService {
   @Remote('balance')
   async balance(): Promise<MoneyBalanceResult> {
     const balance = await this.cachedBalance();
-    return { balance, period: currentPeriod() };
+    return { balance, period: currentPeriod(this.resolveCurrency(balance)) };
   }
 
   /** 单会话费用总览（余额与费用解耦：余额网络请求不阻塞费用计算） */
@@ -672,7 +682,7 @@ export default class MoneyCostService extends TypertRemoteService {
       offPeakCost: fold.offPeakCost,
       simCost: fold.simCost,
       lastReplyCost: last ? last.cost : null,
-      period: currentPeriod(),
+      period: currentPeriod(currency),
       replies: fold.replies.map((r) => ({
         messageId: r.messageId,
         cost: r.cost,

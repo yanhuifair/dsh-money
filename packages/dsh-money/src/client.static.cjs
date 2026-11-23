@@ -220,6 +220,39 @@ function apply(ctx) {
     el.appendChild(wrap);
   }
 
+  /** 明细小表（价目对照）：note + 表头三列 + 数据行；左灰标签右白色数字（原生风格） */
+  function renderTable(el, table) {
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-dsh-money-table', '');
+    wrap.style.cssText = 'margin-top:10px;';
+    if (table.note) {
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:11px;color:var(--dsw-alias-label-tertiary,#7a7a85);margin-bottom:6px;';
+      note.textContent = table.note;
+      wrap.appendChild(note);
+    }
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:18px;row-gap:3px;';
+    (table.head || []).forEach(function (h, i) {
+      const hd = document.createElement('div');
+      hd.style.cssText = 'font-size:11px;color:var(--dsw-alias-label-tertiary,#7a7a85);' + (i ? 'text-align:right;' : '');
+      hd.textContent = h;
+      grid.appendChild(hd);
+    });
+    for (const row of table.rows || []) {
+      row.forEach(function (cell, i) {
+        const c = document.createElement('div');
+        c.style.cssText = i
+          ? 'color:var(--dsw-alias-label-primary,#f5f5f5);text-align:right;font-variant-numeric:tabular-nums;'
+          : 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
+        c.textContent = cell;
+        grid.appendChild(c);
+      });
+    }
+    wrap.appendChild(grid);
+    el.appendChild(wrap);
+  }
+
   /** 当天时刻盘（SVG 实心饼，标准 12 小时钟面）：12 在正上方顺时针 1-11，
    *  每小时一个刻度与数字；闲时整圆绿底，高峰窗口橙色扇区，指针指向当前时刻 */
   function renderClock(el, clock) {
@@ -380,6 +413,7 @@ function apply(ctx) {
       }
       el.appendChild(grid);
     }
+    if (spec.table) renderTable(el, spec.table);
     if (spec.clock) renderClock(el, spec.clock);
     if (spec.chart) renderChart(el, spec.chart);
   }
@@ -499,13 +533,13 @@ function apply(ctx) {
     return MM + '-' + DD + '（' + WEEKDAYS[d.getDay()] + '）' + hh + ':' + mm;
   }
 
-  function periodTooltip(period) {
+  function periodTooltip(period, currency) {
     if (!period) return '计费时段未知';
     const since = fmtDateTime(period.since);
     const next = fmtDateTime(period.nextChangeAt);
     const lines = period.peak
-      ? ['当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）', '三档单价 ×2', '本次高峰：' + since + ' 起', '下次切换：' + next + ' 起为闲时']
-      : ['当前为闲时（含周末与中国法定节假日）', '三档单价为基准价', '本次闲时：' + since + ' 起', '下次切换：' + next + ' 起为高峰'];
+      ? ['当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）', '本次高峰：' + since + ' 起', '下次切换：' + next + ' 起为闲时']
+      : ['当前为闲时（含周末与中国法定节假日）', '本次闲时：' + since + ' 起', '下次切换：' + next + ' 起为高峰'];
     const out = { lines: lines.slice() };
     // 当天时刻盘（host 1.5.2+ 提供 dayMidnightAt / dayPeakWindows）
     if (typeof period.dayMidnightAt === 'number' && Array.isArray(period.dayPeakWindows)) {
@@ -513,6 +547,19 @@ function apply(ctx) {
       const two = (h) => String(h).padStart(2, '0');
       out.lines.push('今日高峰窗口：' + (wins.length ? wins.map((w) => two(w[0]) + ':00-' + two(w[1]) + ':00').join('、') : '全天闲时（周末/节假日）'));
       out.clock = { midnight: period.dayMidnightAt, windows: wins, now: Date.now() };
+    }
+    // API 单价表：闲时/高峰对照（host 1.7.1+ 提供 prices；旧 host 自动跳过）
+    if (Array.isArray(period.prices) && period.prices.length) {
+      const cur = currency === 'USD' ? 'USD' : 'CNY';
+      const unit = cur === 'USD' ? '美元' : '元';
+      const unitPrice = (v) => String(parseFloat(Number(v).toFixed(6)));
+      const rows = [];
+      for (const t of period.prices) {
+        rows.push([t.model + ' 缓存命中', unitPrice(t.hit), unitPrice(t.hit * 2)]);
+        rows.push([t.model + ' 未命中（含写）', unitPrice(t.miss), unitPrice(t.miss * 2)]);
+        rows.push([t.model + ' 输出', unitPrice(t.out), unitPrice(t.out * 2)]);
+      }
+      out.table = { note: 'API 单价（' + unit + ' / 百万 token，高峰为闲时 2 倍）', head: ['计费档', '闲时', '高峰'], rows: rows };
     }
     return out;
   }
@@ -727,7 +774,7 @@ function apply(ctx) {
       ? React.createElement('span', {
         key: 'period',
         'aria-label': periodLabel(balancePeriod) + '时段',
-        ...tipProps(periodTooltip(balancePeriod)),
+        ...tipProps(periodTooltip(balancePeriod, wsTable && wsTable.currency ? wsTable.currency : 'CNY')),
         style: { ...periodBadgeStyle(balancePeriod.peak), marginLeft: '4px' },
       }, periodLabel(balancePeriod))
       : null;

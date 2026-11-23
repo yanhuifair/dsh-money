@@ -1,7 +1,7 @@
 {
   "name": "dsh-money-monorepo",
   "private": true,
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "DeepSeek Harness 费用追踪插件（monorepo 根）",
   "license": "AGPL-3.0",
   "type": "module",
@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test/tip-test.cjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",

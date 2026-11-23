@@ -24,6 +24,11 @@ export interface MoneyPeriod {
   dayPeakWindows: number[][];
   /** 下一次时段切换的时间戳（毫秒），客户端据此安排刷新 */
   nextChangeAt: number;
+  /**
+   * API 单价表（当前显示币种，闲时基准价，每百万 token）；高峰单价为 2 倍。
+   * 时段/高峰弹窗展示价目用；旧版 host 未提供时弹窗退化为纯文字。
+   */
+  prices?: Array<{ model: string; hit: number; miss: number; out: number }> | undefined;
 }
 
 /** 单条回复 token 用量 */
