@@ -57,6 +57,35 @@ function apply(ctx) {
     return () => currencyListeners.delete(fn);
   }
 
+  // ---- 显示设置（localStorage 持久化，重启不丢；host 无公开 KV 存储 API）----
+  let showBalanceSetting = true;
+  const showBalanceListeners = new Set();
+  function setShowBalance(value) {
+    showBalanceSetting = value !== false;
+    for (const fn of Array.from(showBalanceListeners)) {
+      try { fn(showBalanceSetting); } catch (e) {}
+    }
+  }
+  function subscribeShowBalance(fn) {
+    showBalanceListeners.add(fn);
+    return () => showBalanceListeners.delete(fn);
+  }
+  function lsGet(key) {
+    try { return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null; } catch (e) { return null; }
+  }
+  function lsSet(key, value) {
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, value); } catch (e) {}
+  }
+  /** 启动时恢复上次的显示设置；币种还需推送 host，保持 host 计价口径与显示一致 */
+  function loadUiSettings() {
+    const saved = lsGet('dsh-money.currency');
+    if (saved === 'CNY' || saved === 'USD') {
+      setCurrency(saved);
+      remote.config({ currency: saved }).catch(() => {});
+    }
+    if (lsGet('dsh-money.show-balance') === 'false') setShowBalance(false);
+  }
+
   function notify(sessionId) {
     for (const fn of Array.from(listeners)) {
       try { fn(sessionId); } catch (e) {}
@@ -828,14 +857,16 @@ function apply(ctx) {
 
   function BalanceAction(props) {
     const [, force] = React.useState(0);
+    const [visible, setVisible] = React.useState(showBalanceSetting);
     React.useEffect(() => {
       const fn = () => force((n) => n + 1);
       balanceListeners.add(fn);
+      const unsubShow = subscribeShowBalance(setVisible);
       if (!balanceLoaded) loadBalance();
       if (!wsTable) loadWsTable();
-      return () => { balanceListeners.delete(fn); };
+      return () => { balanceListeners.delete(fn); unsubShow(); };
     }, []);
-    if (!balanceLoaded) return null;
+    if (!visible || !balanceLoaded) return null;
     const wide = !(props && props.wide === false);
     const amount = fmtBalance(balance);
     const tipLines = ['账号剩余金额: ' + amount];
@@ -990,6 +1021,7 @@ function apply(ctx) {
   function startSidebarObserver() {
     if (started) return;
     started = true;
+    loadUiSettings();
     loadWsTable();
     loadBalance();
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
@@ -1050,17 +1082,27 @@ function apply(ctx) {
   };
   function CurrencySettingRow() {
     const [value, setValue] = React.useState(currencySetting);
+    const [showBalance, setShowBalanceState] = React.useState(showBalanceSetting);
     React.useEffect(() => {
       const unsub = subscribeCurrency((v) => setValue(v));
-      remote.config({}).then((res) => {
-        const r = res && res.ok === true ? res.value : (res && res.error ? null : res);
-        if (r && r.currency) setValue(r.currency);
-      }).catch(() => {});
+      if (!lsGet('dsh-money.currency')) {
+        remote.config({}).then((res) => {
+          const r = res && res.ok === true ? res.value : (res && res.error ? null : res);
+          if (r && r.currency) setValue(r.currency);
+        }).catch(() => {});
+      }
       return unsub;
     }, []);
+    const onToggleBalance = (e) => {
+      const next = !(e && e.target && e.target.checked === false);
+      setShowBalanceState(next);
+      setShowBalance(next);
+      lsSet('dsh-money.show-balance', next ? 'true' : 'false');
+    };
     const onChange = (e) => {
       const next = e && e.target && e.target.value ? e.target.value : 'auto';
       setValue(next);
+      lsSet('dsh-money.currency', next);
       remote.config({ currency: next })
         .then(() => {
           setCurrency(next);
@@ -1095,20 +1137,35 @@ function apply(ctx) {
       React.createElement('option', { value: 'CNY' }, CURRENCY_LABELS.CNY),
       React.createElement('option', { value: 'USD' }, CURRENCY_LABELS.USD),
     );
-    return React.createElement('div', {
-      style: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '16px 0',
-        borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))',
-      },
-    },
-      React.createElement('div', { style: { flexDirection: 'column', flex: '1', gap: '4px', minWidth: '0', paddingRight: '48px', display: 'flex' } },
-        React.createElement('div', { style: { color: 'var(--dsw-alias-label-primary, inherit)', fontSize: '14px', fontWeight: '400', lineHeight: '22px' } }, '费用显示货币'),
-        React.createElement('div', { style: { color: 'var(--dsw-alias-label-tertiary, rgba(128,128,128,0.7))', fontSize: '12px', lineHeight: '18px' } }, CURRENCY_DESCS[value] || CURRENCY_DESCS.auto),
+    const rowStyle = {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '16px 0',
+      borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))',
+    };
+    const titleStyle = { color: 'var(--dsw-alias-label-primary, inherit)', fontSize: '14px', fontWeight: '400', lineHeight: '22px' };
+    const descStyle = { color: 'var(--dsw-alias-label-tertiary, rgba(128,128,128,0.7))', fontSize: '12px', lineHeight: '18px' };
+    return React.createElement(React.Fragment, null,
+      React.createElement('div', { style: rowStyle },
+        React.createElement('div', { style: { flexDirection: 'column', flex: '1', gap: '4px', minWidth: '0', paddingRight: '48px', display: 'flex' } },
+          React.createElement('div', { style: titleStyle }, '费用显示货币'),
+          React.createElement('div', { style: descStyle }, CURRENCY_DESCS[value] || CURRENCY_DESCS.auto),
+        ),
+        select,
       ),
-      select,
+      React.createElement('div', { style: rowStyle },
+        React.createElement('div', { style: { flexDirection: 'column', flex: '1', gap: '4px', minWidth: '0', paddingRight: '48px', display: 'flex' } },
+          React.createElement('div', { style: titleStyle }, '显示账号余额'),
+          React.createElement('div', { style: descStyle }, '侧边栏底部的余额、本地消费与高峰/闲时徽章；费用标签不受影响'),
+        ),
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: showBalance,
+          onChange: onToggleBalance,
+          style: { width: '16px', height: '16px', accentColor: 'var(--dsw-alias-interactive-primary, #4c8dff)', cursor: 'pointer', flex: 'none' },
+        }),
+      ),
     );
   }
 
