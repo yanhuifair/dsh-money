@@ -41,6 +41,8 @@ function apply(ctx) {
   let balanceLoaded = false;
   let balanceInflight = false;
   let periodTimer = null;
+  /** 最近一次 overview 携带的 API 价目表（单条回复公式的 Flash 单价来源） */
+  let lastPrices = null;
 
   let currencySetting = 'auto';
   const currencyListeners = new Set();
@@ -80,6 +82,7 @@ function apply(ctx) {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object' && !value.error) {
           bySession.set(sessionId, value);
+          if (value.period && Array.isArray(value.period.prices)) lastPrices = value.period.prices;
           // 预建 messageId 索引，避免每条回复渲染时线性遍历全部 replies
           const idx = new Map();
           if (Array.isArray(value.replies)) {
@@ -125,19 +128,32 @@ function apply(ctx) {
     return String(n);
   }
 
-  /** 公式数值行：如「闲时 9 条: (22.1M×1 + 492.9K×0.02 + 8.2M×4) ÷ 1M ≈ ~¥ 1.87」；0 量档位省略 */
-  function simFormulaLine(label, b, p, currency, times2) {
+  /** Flash 基准单价：host 价目表优先，退回到内置口径 */
+  function flashPrices(pricesArr, currency) {
+    const ps = Array.isArray(pricesArr) ? pricesArr.find((t) => t && t.model === 'deepseek-flash') : null;
+    return ps || (currency === 'USD' ? { hit: 0.003, miss: 0.15, out: 0.6 } : { hit: 0.02, miss: 1, out: 4 });
+  }
+
+  /** 公式演算：token 三项 × Flash 单价（高峰外层再乘 2）；0 量档位省略 */
+  function formulaExpr(i, h, o, p, times2) {
     const u = (v) => String(parseFloat(Number(v).toFixed(6)));
     const terms = [];
-    if (b.i > 0) terms.push(fmtTokShort(b.i) + '×' + u(p.miss));
-    if (b.h > 0) terms.push(fmtTokShort(b.h) + '×' + u(p.hit));
-    if (b.o > 0) terms.push(fmtTokShort(b.o) + '×' + u(p.out));
+    if (i > 0) terms.push(fmtTokShort(i) + '×' + u(p.miss));
+    if (h > 0) terms.push(fmtTokShort(h) + '×' + u(p.hit));
+    if (o > 0) terms.push(fmtTokShort(o) + '×' + u(p.out));
     if (!terms.length) return null;
     let expr = '(' + terms.join(' + ') + ') ÷ 1M';
-    let val = (b.i * p.miss + b.h * p.hit + b.o * p.out) / 1e6;
+    let val = (i * p.miss + h * p.hit + o * p.out) / 1e6;
     if (times2) { expr = '(' + expr + ') × 2'; val *= 2; }
+    return { expr: expr, val: val };
+  }
+
+  /** 公式数值行：如「闲时 9 条: (22.1M×1 + 492.9K×0.02 + 8.2M×4) ÷ 1M ≈ ~¥ 1.87」 */
+  function simFormulaLine(label, b, p, currency, times2) {
+    const f = formulaExpr(b.i, b.h, b.o, p, times2);
+    if (!f) return null;
     const nLabel = label + ' ' + b.n + ' 条' + (times2 ? '（单价 ×2）' : '');
-    return nLabel + ': ' + expr + ' ≈ ' + fmtMoney(val, currency);
+    return nLabel + ': ' + f.expr + ' ≈ ' + fmtMoney(f.val, currency);
   }
 
   /** 汇总 sim 回复的 token（按真实时段分组）；未命中价按含 cache write 口径 */
@@ -153,11 +169,7 @@ function apply(ctx) {
       b.n += 1;
     }
     if (!g.off.n && !g.peak.n) return null;
-    let prices = null;
-    const ps = o && o.period && Array.isArray(o.period.prices) ? o.period.prices : null;
-    if (ps) prices = ps.find((t) => t && t.model === 'deepseek-flash') || null;
-    if (!prices) prices = currency === 'USD' ? { hit: 0.003, miss: 0.15, out: 0.6 } : { hit: 0.02, miss: 1, out: 4 };
-    return { off: g.off, peak: g.peak, prices };
+    return { off: g.off, peak: g.peak, prices: flashPrices(o && o.period ? o.period.prices : null, currency) };
   }
   const badgeStyle = {
     color: GOLD,
@@ -679,6 +691,13 @@ function apply(ctx) {
       if (t.cacheRead > 0) lines.push('缓存命中: ' + fmtTokens(t.cacheRead));
       if (t.cacheWrite > 0) lines.push('缓存写入: ' + fmtTokens(t.cacheWrite));
       lines.push('输出: ' + fmtTokens(t.output));
+      if (r.sim) {
+        const f = formulaExpr(
+          (t.input || 0) + (t.cacheWrite || 0), t.cacheRead || 0, t.output || 0,
+          flashPrices(lastPrices, currency), !!r.peak,
+        );
+        if (f) lines.push('计算公式: ' + f.expr + ' ≈ ' + fmtMoney(f.val, currency));
+      }
     }
     lines.push(moneyUnitNote(currency));
     return lines.join('\n');

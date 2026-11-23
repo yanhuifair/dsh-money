@@ -147,9 +147,14 @@ assert(repSim.includes('本地模型：无 API 账单'), 'sim 回复有本地口
 assert(!repSim.includes('缓存命中:') && !repSim.includes('缓存写入:'), '0 值缓存行省略');
 assert(repSim.includes('未命中输入: 10.3K token') && repSim.includes('输出: 185 token'), '非 0 token 行保留');
 assert(repSim.endsWith('元，按官方价目估算，不代表最终账单'), '回复底部灰注释');
+assert(repSim.includes('计算公式: (10.3K×1 + 185×4) ÷ 1M ≈ ~¥ 0.01'), '本地回复公式行：token 实数（(10337×1+185×4)/1M≈0.01）');
+const repSimPeak = tip.replyTooltip({ cost: 0.02, model: 'deepseek-flash', sim: true, peak: true, tokens: { input: 1000000, cacheRead: 0, cacheWrite: 0, output: 1000000 } }, 'CNY');
+assert(repSimPeak.includes('计算公式: ((1.0M×1 + 1.0M×4) ÷ 1M) × 2 ≈ ~¥ 10.00'), '高峰本地回复公式含 ×2');
+
 const repPeak = tip.replyTooltip({ cost: 2.5, model: 'deepseek-v4-pro', sim: false, peak: true, tokens: { input: 100, cacheRead: 492928, cacheWrite: 0, output: 2000 } }, 'CNY');
 assert(repPeak.includes('计价时段: 高峰（单价 ×2）'), 'API 回复高峰时段行');
 assert(repPeak.includes('缓存命中: 492.9K token'), '非 0 缓存命中显示');
+assert(!repPeak.includes('计算公式'), 'API 回复不带本地公式');
 assert(!repPeak.includes('闲时:'), '闲时行不混入');
 const repUsd = tip.replyTooltip({ cost: 0.5, model: 'deepseek-flash', sim: false, peak: false, tokens: { input: 1, cacheRead: 0, cacheWrite: 0, output: 1 } }, 'USD');
 assert(repUsd.endsWith('美元，按官方价目估算，不代表最终账单'), 'USD 单位注释');
