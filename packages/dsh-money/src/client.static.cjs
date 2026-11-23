@@ -103,11 +103,61 @@ function apply(ctx) {
     return (currency === 'USD' ? '美元' : '元') + '，按官方价目估算，不代表最终账单';
   }
 
-  function simTip(total, count, currency) {
+  function simTip(total, count, currency, stats) {
     const lines = ['本地模型消费: ' + fmtMoney(total, currency) + (count > 0 ? '（' + count + ' 条）' : '')];
+    if (stats && stats.prices) {
+      // 公式说明行不含冒号 → 全宽灰注释；数值行按闲时/高峰分组，与逐条模拟口径一致
+      lines.push('计算公式 =（未命中输入 × 未命中价 + 缓存命中 × 命中价 + 输出 × 输出价）÷ 1,000,000');
+      const off = stats.off && stats.off.n ? simFormulaLine('闲时', stats.off, stats.prices, currency, false) : null;
+      const pk = stats.peak && stats.peak.n ? simFormulaLine('高峰', stats.peak, stats.prices, currency, true) : null;
+      if (off) lines.push(off);
+      if (pk) lines.push(pk);
+    }
     lines.push('本地模型无 API 账单，此金额按 DeepSeek API 规则（Flash 档，高峰 ×2）估算');
     lines.push('仅展示参考，不计入 API 消费、不从余额扣除');
     return { lines: lines };
+  }
+
+  /** token 短记数（公式内用，不带单位后缀）：2,000,000 → 2.0M */
+  function fmtTokShort(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  /** 公式数值行：如「闲时 9 条: (22.1M×1 + 492.9K×0.02 + 8.2M×4) ÷ 1M ≈ ~¥ 1.87」；0 量档位省略 */
+  function simFormulaLine(label, b, p, currency, times2) {
+    const u = (v) => String(parseFloat(Number(v).toFixed(6)));
+    const terms = [];
+    if (b.i > 0) terms.push(fmtTokShort(b.i) + '×' + u(p.miss));
+    if (b.h > 0) terms.push(fmtTokShort(b.h) + '×' + u(p.hit));
+    if (b.o > 0) terms.push(fmtTokShort(b.o) + '×' + u(p.out));
+    if (!terms.length) return null;
+    let expr = '(' + terms.join(' + ') + ') ÷ 1M';
+    let val = (b.i * p.miss + b.h * p.hit + b.o * p.out) / 1e6;
+    if (times2) { expr = '(' + expr + ') × 2'; val *= 2; }
+    const nLabel = label + ' ' + b.n + ' 条' + (times2 ? '（单价 ×2）' : '');
+    return nLabel + ': ' + expr + ' ≈ ' + fmtMoney(val, currency);
+  }
+
+  /** 汇总 sim 回复的 token（按真实时段分组）；未命中价按含 cache write 口径 */
+  function simStatsOf(o, currency) {
+    const replies = Array.isArray(o && o.replies) ? o.replies : [];
+    const g = { off: { i: 0, h: 0, o: 0, n: 0 }, peak: { i: 0, h: 0, o: 0, n: 0 } };
+    for (const r of replies) {
+      if (!r || !r.sim || !r.tokens) continue;
+      const b = r.peak ? g.peak : g.off;
+      b.i += (r.tokens.input || 0) + (r.tokens.cacheWrite || 0);
+      b.h += r.tokens.cacheRead || 0;
+      b.o += r.tokens.output || 0;
+      b.n += 1;
+    }
+    if (!g.off.n && !g.peak.n) return null;
+    let prices = null;
+    const ps = o && o.period && Array.isArray(o.period.prices) ? o.period.prices : null;
+    if (ps) prices = ps.find((t) => t && t.model === 'deepseek-flash') || null;
+    if (!prices) prices = currency === 'USD' ? { hit: 0.003, miss: 0.15, out: 0.6 } : { hit: 0.02, miss: 1, out: 4 };
+    return { off: g.off, peak: g.peak, prices };
   }
   const badgeStyle = {
     color: GOLD,
@@ -641,7 +691,7 @@ function apply(ctx) {
     let peakCount = 0;
     let simCount = 0;
     for (const r of replies) {
-      if (r && r.peak) peakCount += 1;
+      if (r && r.peak && !r.sim) peakCount += 1;
       if (r && r.sim) simCount += 1;
     }
     const apiCount = replies.length - simCount;
@@ -693,7 +743,7 @@ function apply(ctx) {
         ? React.createElement('span', {
           key: 'conv-sim',
           'aria-label': '本对话本地模型消费',
-          ...tipProps(simTip(simCost, simCountOf(o), currency)),
+          ...tipProps(simTip(simCost, simCountOf(o), currency, simStatsOf(o, currency))),
           style: { ...badgeStyle, ...simBadgeStyle },
         }, '本地 ' + fmtMoney(simCost, currency))
         : null,

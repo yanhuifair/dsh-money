@@ -51,7 +51,7 @@ let src = fs.readFileSync(SRC, 'utf8');
 // tip 函数定义在 apply(ctx) 作用域内（函数声明提升）：在 apply 首部注入钩子取出
 const ANCHOR = '  startSidebarObserver();\n}';
 if (!src.includes(ANCHOR)) { console.error('FAIL: apply 结尾锚点丢失，测试需随源码更新'); process.exit(1); }
-src = src.replace(ANCHOR, '  __DSH_MONEY_TEST_HOOK__ && __DSH_MONEY_TEST_HOOK__({ ensureTip, renderTip, periodTooltip, tipKey, replyTooltip, conversationTooltip });\n' + ANCHOR);
+src = src.replace(ANCHOR, '  __DSH_MONEY_TEST_HOOK__ && __DSH_MONEY_TEST_HOOK__({ ensureTip, renderTip, periodTooltip, tipKey, replyTooltip, conversationTooltip, simTip, simStatsOf, fmtTokShort });\n' + ANCHOR);
 let tip = null;
 const moduleObj = { exports: {} };
 vm.runInNewContext(src + "\nmodule.exports.apply({ remote: { moneyCost: { overview: async () => ({}), balance: async () => ({}), workspacesAll: async () => ({}), config: async () => ({}) } }, slots: { inject() { return () => {}; } }, effect: (fn) => { try { fn(); } catch (e) {} }, interval: () => 0, timeout: async () => {}, get: () => undefined, timer: { setInterval: () => 0, clearInterval: () => {} } });", {
@@ -156,7 +156,7 @@ assert(repUsd.endsWith('美元，按官方价目估算，不代表最终账单')
 
 // ---------- 本对话弹窗 ----------
 const conv1 = tip.conversationTooltip({ conversationCost: 8.7188, peakCost: 2.125, offPeakCost: 6.5938, replies: [
-  { messageId: 'm1', cost: 8.7188, sim: false, peak: true }, { messageId: 'm2', cost: 2.5, sim: true },
+  { messageId: 'm1', cost: 8.7188, sim: false, peak: true, tokens: { input: 1000000, cacheRead: 0, cacheWrite: 0, output: 0 } }, { messageId: 'm2', cost: 2.5, sim: true, peak: true, tokens: { input: 1000000, cacheRead: 0, cacheWrite: 0, output: 1000000 } },
 ] }, 'CNY');
 assert(conv1.split('\n')[0] === '本对话累计费用: ~¥ 8.72', '对话标题短格式（无「（估算）」）');
 assert(conv1.includes('高峰合计: ~¥ 2.13（1 条）'), '高峰分项含条数');
@@ -164,6 +164,36 @@ assert(conv1.includes('本地模型消费以白色徽章单独显示'), '有 sim
 assert(conv1.endsWith('元，按官方价目估算，不代表最终账单'), '对话底部灰注释');
 const conv2 = tip.conversationTooltip({ conversationCost: 8.7188, peakCost: 0, offPeakCost: 8.7188, replies: [{ messageId: 'm1', cost: 8.7188, sim: false }] }, 'CNY');
 assert(!conv2.includes('白色徽章'), '无 sim 时不出现白徽章提示');
+
+// ---------- 本地消费弹窗：带 token 实数的计算公式 ----------
+const o = {
+  conversationCost: 8.7188, peakCost: 2.125, offPeakCost: 6.5938,
+  period: { prices: [{ model: 'deepseek-flash', hit: 0.02, miss: 1, out: 4 }] },
+  replies: [
+    { messageId: 'a', cost: 8.7188, sim: false, peak: false, tokens: { input: 5e6, cacheRead: 0, cacheWrite: 0, output: 1e6 } },
+    { messageId: 'b', cost: 1.0, sim: true, peak: false, tokens: { input: 2e6, cacheRead: 492928, cacheWrite: 0, output: 1e6 } },
+    { messageId: 'c', cost: 6.0, sim: true, peak: true, tokens: { input: 1e6, cacheRead: 0, cacheWrite: 0, output: 1e6 } },
+  ],
+};
+const stats = tip.simStatsOf(o, 'CNY');
+assert(stats && stats.off.n === 1 && stats.peak.n === 1, 'sim 回复按真实时段分组');
+assert(stats.off.h === 492928 && stats.off.i === 2e6, '闲时桶 token 求和');
+assert(tip.fmtTokShort(492928) === '492.9K' && tip.fmtTokShort(2e6) === '2.0M' && tip.fmtTokShort(185) === '185', 'token 短记数');
+const st = tip.simTip(16, 2, 'CNY', stats);
+assert(st.lines[0] === '本地模型消费: ~¥ 16.00（2 条）', '本地弹窗标题');
+assert(st.lines[1].startsWith('计算公式 =（未命中输入'), '公式说明行（全宽灰注释）');
+assert(st.lines[2] === '闲时 1 条: (2.0M×1 + 492.9K×0.02 + 1.0M×4) ÷ 1M ≈ ~¥ 6.01', '闲时公式行：token 实数 + 精确求值');
+assert(st.lines[3] === '高峰 1 条（单价 ×2）: ((1.0M×1 + 1.0M×4) ÷ 1M) × 2 ≈ ~¥ 10.00', '高峰公式行：×2 括层');
+assert(st.lines[4].includes('本地模型无 API 账单') && st.lines[5].includes('不计入 API 消费'), '口径说明保留');
+const stNoHit = tip.simTip(16, 2, 'CNY', { off: { i: 2e6, h: 0, o: 1e6, n: 1 }, peak: { i: 0, h: 0, o: 0, n: 0 }, prices: { hit: 0.02, miss: 1, out: 4 } });
+assert(stNoHit.lines.length === 5 && stNoHit.lines[2].includes('2.0M×1') && !stNoHit.lines[2].includes('0.02') && stNoHit.lines[4].includes('不计入'), '0 量档位省略、无高峰行则无高峰公式');
+const stNone = tip.simTip(3.33, 12, 'CNY');
+assert(stNone.lines.length === 3 && !stNone.lines.some((l) => l.includes('计算公式')), '无 stats（余额/工作区入口）保持原样');
+// 高峰条数不被 sim 污染
+const convPeak = tip.conversationTooltip({ conversationCost: 1, peakCost: 1, offPeakCost: 0, replies: [
+  { messageId: 'p1', cost: 1, sim: false, peak: true }, { messageId: 'p2', cost: 1, sim: true, peak: true },
+] }, 'CNY');
+assert(convPeak.includes('高峰合计: ~¥ 1.00（1 条）'), '高峰条数只算 API 回复');
 
 console.log('\n' + pass + ' PASS, ' + fail + ' FAIL');
 process.exit(fail ? 1 : 0);

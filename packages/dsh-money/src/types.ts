@@ -46,7 +46,7 @@ export interface MoneyReplyCost {
   model: string;
   /** 该条回复发生时段是否为高峰（单价 ×2） */
   peak: boolean;
-  /** 本地/未计价模型：cost 为模拟值（Flash 基准价），不计入 API 消费 */
+  /** 本地/未计价模型：cost 按 Flash 规则（同时段，高峰 ×2）模拟，不计入 API 消费 */
   sim: boolean;
   tokens: MoneyTokens;
 }
