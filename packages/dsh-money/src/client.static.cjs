@@ -831,6 +831,7 @@ function apply(ctx) {
       const fn = () => force((n) => n + 1);
       balanceListeners.add(fn);
       if (!balanceLoaded) loadBalance();
+      if (!wsTable) loadWsTable();
       return () => { balanceListeners.delete(fn); };
     }, []);
     if (!balanceLoaded) return null;
@@ -892,19 +893,31 @@ function apply(ctx) {
   let wsTable = null;
   let wsDays = null; // 最近 7 天消费（host workspacesAll 顺路返回）
 
+  /** 工作区费用表加载：远程失败/未就绪（reject 或 ok:false）时短退避重试，
+   *  否则重启 DSH 后首帧拉取失败要空等 60 秒轮询——期间本地总花费徽章缺失 */
+  let wsRetry = 0;
+  let wsRetryTimer = null;
+  function scheduleWsRetry() {
+    if (wsTable || wsRetry >= 5 || wsRetryTimer) return;
+    wsRetry += 1;
+    wsRetryTimer = setTimeout(() => { wsRetryTimer = null; loadWsTable(); }, 2000 * wsRetry);
+  }
   function loadWsTable() {
     remote.workspacesAll()
       .then((res) => {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
         if (value && typeof value === 'object' && !value.error) {
           wsTable = value;
+          wsRetry = 0;
           wsDays = Array.isArray(value.days) ? value.days : null;
           // 让余额弹窗能用上近 7 天数据：驱动 BalanceAction 重渲染
           for (const fn of Array.from(balanceListeners)) { try { fn(balance); } catch (e) {} }
           applyBadges();
+        } else {
+          scheduleWsRetry();
         }
       })
-      .catch(() => {});
+      .catch(() => { scheduleWsRetry(); });
   }
 
   function applyBadges() {
@@ -992,6 +1005,7 @@ function apply(ctx) {
       try { observer.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
       ctx.effect(() => () => { if (badgeTimer) { clearTimeout(badgeTimer); badgeTimer = null; } });
     }
+    ctx.effect(() => () => { if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; } });
     const disposeWs = ctx.interval(() => loadWsTable(), 60000);
     const disposeBalance = ctx.interval(() => loadBalance(), 60000);
     ctx.effect(() => () => { disposeWs(); disposeBalance(); });
