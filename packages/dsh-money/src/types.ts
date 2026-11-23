@@ -98,6 +98,8 @@ export interface MoneyDayCost {
 export interface MoneyWorkspacesAll {
   /** 最近 7 个自然日（含今天，新→旧）的总消费，缺数据的日子为 0 */
   days: MoneyDayCost[];
+  /** 最近 7 天本地模型模拟费用（与 days 同日序，供「本地」弹窗柱状图） */
+  simDays: MoneyDayCost[];
   currency: string;
   workspaces: MoneyWorkspaceCost[];
 }

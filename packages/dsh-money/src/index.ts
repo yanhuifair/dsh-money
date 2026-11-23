@@ -277,7 +277,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.9.0',
+        version: '1.9.1',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -422,17 +422,17 @@ export default class MoneyCostService extends TypertRemoteService {
   /** 会话折叠增量状态：记录最后处理的 seq，只折叠新增事件（key = sessionId + currency） */
   private foldCache = new Map<
     string,
-    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null; days: Record<string, number>; lastSeq: number }
+    { replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null; days: Record<string, number>; simDays: Record<string, number>; lastSeq: number }
   >();
 
   /** 折叠会话：增量处理（只读新增事件并追加，避免重复遍历整个日志） */
   private async foldSession(
     sessionId: string,
     currency: 'CNY' | 'USD',
-  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null; days: Record<string, number> }> {
+  ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null; days: Record<string, number>; simDays: Record<string, number> }> {
     const key = sessionId + '::' + currency;
     const cached = this.foldCache.get(key);
-    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null, simCost: null, days: {} as Record<string, number> };
+    const empty = { replies: [] as MoneyReplyCost[], conversationCost: null, peakCost: null, offPeakCost: null, simCost: null, days: {} as Record<string, number>, simDays: {} as Record<string, number> };
     const sessionQuery = this.ctx.get('sessionQuery') as
       | { readSession(id: string): Promise<{ events?: Array<Record<string, unknown> & { seq?: number }> } | undefined> }
       | undefined;
@@ -443,7 +443,7 @@ export default class MoneyCostService extends TypertRemoteService {
       events = snap && Array.isArray(snap.events) ? (snap.events as Array<Record<string, unknown> & { seq?: number }>) : [];
     } catch (e) {
       return cached
-        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost, simCost: cached.simCost, days: { ...cached.days } }
+        ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost, simCost: cached.simCost, days: { ...cached.days }, simDays: { ...(cached.simDays || {}) } }
         : empty;
     }
     // 增量：从缓存的 lastSeq 之后继续；无缓存则全量
@@ -458,7 +458,8 @@ export default class MoneyCostService extends TypertRemoteService {
     // 只处理 seq > fromSeq 的新增事件
     const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number' ? e.seq > fromSeq : true)) : events;
     const daysOut: Record<string, number> = cached ? { ...cached.days } : {};
-    const fold = await this.foldEvents(newEvents, currency, freshReplies, carried, daysOut);
+    const daysSimOut: Record<string, number> = cached && cached.simDays ? { ...cached.simDays } : {};
+    const fold = await this.foldEvents(newEvents, currency, freshReplies, carried, daysOut, daysSimOut);
     // 更新缓存（重置 TTL）
     this.foldCache.set(key, {
       replies: fold.replies,
@@ -467,9 +468,10 @@ export default class MoneyCostService extends TypertRemoteService {
       offPeakCost: fold.offPeakCost,
       simCost: fold.simCost,
       days: daysOut,
+      simDays: daysSimOut,
       lastSeq: this.maxSeq(events),
     });
-    return { ...fold, days: daysOut };
+    return { ...fold, days: daysOut, simDays: daysSimOut };
   }
 
   /** 批量折叠事件（分片异步处理，避免长任务阻塞事件循环） */
@@ -479,6 +481,7 @@ export default class MoneyCostService extends TypertRemoteService {
     replies: MoneyReplyCost[],
     carried: { conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null },
     daysOut?: Record<string, number>,
+    daysSimOut?: Record<string, number>,
   ): Promise<{ replies: MoneyReplyCost[]; conversationCost: number | null; peakCost: number | null; offPeakCost: number | null; simCost: number | null }> {
     const timer = this.ctx.get('timer') as { timeout(ms: number): Promise<void> } | undefined;
     let lastModel = 'deepseek-flash';
@@ -539,6 +542,10 @@ export default class MoneyCostService extends TypertRemoteService {
           daysOut[dayKey] = (daysOut[dayKey] || 0) + cost;
         }
       }
+      if (cost != null && sim && daysSimOut) {
+        const dayKey = dayKeyBeijing(time);
+        daysSimOut[dayKey] = (daysSimOut[dayKey] || 0) + cost;
+      }
       const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
       replies.push({
         messageId: typeof message.id === 'string' ? message.id : null,
@@ -572,19 +579,20 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 全量工作区费用表 */
-  private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<{ workspaces: MoneyWorkspaceCost[]; days: MoneyDayCost[] }> {
+  private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<{ workspaces: MoneyWorkspaceCost[]; days: MoneyDayCost[]; simDays: MoneyDayCost[] }> {
     const registry = this.ctx.get('workspaceRegistry') as
       | { list(): Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> }
       | undefined;
-    if (!registry || typeof registry.list !== 'function') return { workspaces: [], days: emptyDays() };
+    if (!registry || typeof registry.list !== 'function') return { workspaces: [], days: emptyDays(), simDays: emptyDays() };
     let list: Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> = [];
     try {
       list = registry.list();
     } catch (e) {
-      return { workspaces: [], days: emptyDays() };
+      return { workspaces: [], days: emptyDays(), simDays: emptyDays() };
     }
     const workspaces: MoneyWorkspaceCost[] = [];
     const dayTotals: Record<string, number> = {};
+    const dayTotalsSim: Record<string, number> = {};
     for (const w of list) {
       const sessionIds = Array.isArray(w.sessionIds) ? (w.sessionIds as string[]) : [];
       let total = 0;
@@ -599,6 +607,9 @@ export default class MoneyCostService extends TypertRemoteService {
         const fold = await this.foldSession(sid, currency);
         for (const [dayKey, dayCost] of Object.entries(fold.days)) {
           dayTotals[dayKey] = (dayTotals[dayKey] || 0) + dayCost;
+        }
+        for (const [dayKey, dayCost] of Object.entries(fold.simDays || {})) {
+          dayTotalsSim[dayKey] = (dayTotalsSim[dayKey] || 0) + dayCost;
         }
         if (fold.conversationCost != null) {
           total += fold.conversationCost;
@@ -635,7 +646,13 @@ export default class MoneyCostService extends TypertRemoteService {
       const mmdd = dayKey.slice(5);
       days.push({ date: mmdd, cost: roundCost(dayTotals[dayKey] || 0) });
     }
-    return { workspaces, days };
+    const simDays: MoneyDayCost[] = [];
+    for (let i = 0; i < 7; i++) {
+      const dayKey = dayKeyBeijing(now - i * DAY_MS);
+      const mmdd = dayKey.slice(5);
+      simDays.push({ date: mmdd, cost: roundCost(dayTotalsSim[dayKey] || 0) });
+    }
+    return { workspaces, days, simDays };
   }
 
   /** 读取/设置显示币种 */
@@ -699,8 +716,8 @@ export default class MoneyCostService extends TypertRemoteService {
   async workspacesAll(): Promise<MoneyWorkspacesAll> {
     const balance = await this.cachedBalance();
     const currency = this.resolveCurrency(balance);
-    const { workspaces, days } = await this.allWorkspaceCosts(currency);
-    return { currency, workspaces, days };
+    const { workspaces, days, simDays } = await this.allWorkspaceCosts(currency);
+    return { currency, workspaces, days, simDays };
   }
 }
 

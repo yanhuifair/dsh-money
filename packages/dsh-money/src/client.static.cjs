@@ -276,7 +276,7 @@ function apply(ctx) {
     head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-top:12px;';
     const hl = document.createElement('span');
     hl.style.cssText = 'color:var(--dsw-alias-label-secondary,#a0a0a8);';
-    hl.textContent = '最近 7 天（估算）';
+    hl.textContent = chart.title || '最近 7 天（估算）';
     const hv = document.createElement('span');
     hv.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);font-variant-numeric:tabular-nums;';
     hv.textContent = fmtMoney(chart.total == null ? 0 : chart.total, cur);
@@ -858,17 +858,24 @@ function apply(ctx) {
     if (wsTable && Array.isArray(wsTable.workspaces)) {
       for (const w of wsTable.workspaces) { if (w && typeof w.simCost === 'number') simTotal += w.simCost; }
     }
+    const simCur = wsTable && wsTable.currency ? wsTable.currency : 'CNY';
+    let simTip = { lines: [
+      '本地模型消费: ' + fmtMoney(simTotal, simCur),
+      '本地模型无 API 账单，此金额按 DeepSeek API 规则（Flash 档，高峰 ×2）估算',
+      '仅展示参考，不计入 API 消费、不从余额扣除',
+    ] };
+    if (wsSimDays && wsSimDays.length) {
+      let simWeek = 0;
+      for (const d of wsSimDays) { if (d && typeof d.cost === 'number') simWeek += d.cost; }
+      simTip = { lines: simTip.lines, chart: { total: simWeek, currency: simCur, days: wsSimDays, title: '最近 7 天本地（估算）' } };
+    }
     const simBadge = simTotal > 0
       ? React.createElement('span', {
         key: 'sim',
         'aria-label': '本地模型消费',
-        ...tipProps({ lines: [
-          '本地模型消费: ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'),
-          '本地模型无 API 账单，此金额按 DeepSeek API 规则（Flash 档，高峰 ×2）估算',
-          '仅展示参考，不计入 API 消费、不从余额扣除',
-        ] }),
+        ...tipProps(simTip),
         style: { ...badgeStyle, ...simBadgeStyle, marginLeft: '4px' },
-      }, '本地 ' + fmtMoney(simTotal, wsTable && wsTable.currency ? wsTable.currency : 'CNY'))
+      }, '本地 ' + fmtMoney(simTotal, simCur))
       : null;
     const period = balancePeriod
       ? React.createElement('span', {
@@ -889,6 +896,7 @@ function apply(ctx) {
   let applying = false;
   let wsTable = null;
   let wsDays = null; // 最近 7 天消费（host workspacesAll 顺路返回）
+  let wsSimDays = null; // 最近 7 天本地模型模拟费用（同一返回的 simDays）
 
   /** 工作区费用表加载：远程失败/未就绪（reject 或 ok:false）时短退避重试，
    *  否则重启 DSH 后首帧拉取失败要空等 60 秒轮询——期间本地总花费徽章缺失 */
@@ -907,6 +915,7 @@ function apply(ctx) {
           wsTable = value;
           wsRetry = 0;
           wsDays = Array.isArray(value.days) ? value.days : null;
+          wsSimDays = Array.isArray(value.simDays) ? value.simDays : null;
           // 让余额弹窗能用上近 7 天数据：驱动 BalanceAction 重渲染
           for (const fn of Array.from(balanceListeners)) { try { fn(balance); } catch (e) {} }
           applyBadges();
