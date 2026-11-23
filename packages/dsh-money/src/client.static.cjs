@@ -340,8 +340,8 @@ function apply(ctx) {
   function renderClock(el, clock) {
     const SVG = 'http://www.w3.org/2000/svg';
     const CC = 62, R = 44; // viewBox 124×124，圆心 (62,62)，饼半径 44，外圈留给刻度与数字
-    const GREEN = 'rgba(63,185,80,0.75)';
-    const ORANGE = 'rgba(255,143,31,0.9)';
+    const GREEN = '#3fb950';
+    const ORANGE = '#ff8f1f';
     const TICK = 'var(--dsw-alias-label-tertiary,#7a7a85)';
     // 12 小时钟面：12（=0）点在正上方，顺时针；hour12 取 0-12
     const pt = (hour12, r) => {

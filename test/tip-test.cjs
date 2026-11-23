@@ -132,6 +132,9 @@ assert(dfs(tableWrap, (n) => textOf(n) === '13.5').length === 1 && dfs(tableWrap
 const groupCells = dfs(tableWrap, (n) => (n.style.cssText || '').includes('grid-column:1 / -1') && textOf(n) === 'deepseek-flash');
 assert(groupCells.length === 1, '模型组标题占整行（grid-column:1 / -1）');
 assert(dfs(tableWrap, (n) => textOf(n) === 'deepseek-flash 缓存命中').length === 0, '模型名不再重复出现在档位行');
+const dialBase = dfs(tipEl, (n) => n.tag === 'circle' && (n.attrs.fill || '') === '#3fb950');
+assert(dialBase.length >= 1, 'DOM：时刻盘整盘=闲时徽章绿 #3fb950');
+assert(dfs(tipEl, (n) => n.tag === 'path' && (n.attrs.fill || '') === '#ff8f1f').length >= 1, 'DOM：高峰扇区=高峰徽章橙 #ff8f1f');
 const children = tipEl.children;
 const titleVal = dfs(tipEl, (n) => n.tag === 'span' && textOf(n) === '闲时' && (n.style.color || '') === '#3fb950');
 assert(titleVal.length >= 1, 'DOM：闲时数值已染徽章绿');
