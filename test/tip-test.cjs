@@ -151,6 +151,9 @@ const repSim = tip.replyTooltip({ cost: 0.011077, model: 'deepseek-flash', sim: 
 assert(repSim.split('\n')[0] === '本次回复费用: ~¥ 0.01', '回复标题短格式（旧「（元，模拟）」后缀已移除）');
 assert(!repSim.includes('模拟'), '回复弹窗无「模拟」旧文案');
 assert(repSim.includes('本地模型：无 API 账单'), 'sim 回复有本地口径说明');
+assert(repSim.includes('计价时段: 闲时（基准价）'), '本地回复也显示闲时时段');
+const repSim2Peak = tip.replyTooltip({ cost: 0.02, model: 'deepseek-flash', sim: true, peak: true, tokens: null }, 'CNY');
+assert(repSim2Peak.includes('计价时段: 高峰（单价 ×2）'), '本地回复高峰时段行');
 assert(!repSim.includes('缓存命中:') && !repSim.includes('缓存写入:'), '0 值缓存行省略');
 assert(repSim.includes('未命中输入: 10.3K token') && repSim.includes('输出: 185 token'), '非 0 token 行保留');
 assert(repSim.endsWith('元，按官方价目估算，不代表最终账单'), '回复底部灰注释');

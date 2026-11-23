@@ -721,9 +721,8 @@ function apply(ctx) {
     if (!r) return '本次回复费用';
     const lines = ['本次回复费用: ' + fmtMoney(r.cost, currency)];
     if (r.model) lines.push('模型: ' + r.model);
-    lines.push(r.sim
-      ? '本地模型：无 API 账单，按 DeepSeek API 规则（Flash 档，高峰 ×2）估算，不计入 API 消费'
-      : '计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时（基准价）'));
+    lines.push('计价时段: ' + (r.peak ? '高峰（单价 ×2）' : '闲时（基准价）'));
+    if (r.sim) lines.push('本地模型：无 API 账单，按 DeepSeek API 规则（Flash 档）估算，不计入 API 消费');
     if (r.tokens) {
       const t = r.tokens;
       lines.push('未命中输入: ' + fmtTokens(t.input));
