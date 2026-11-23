@@ -220,17 +220,25 @@ function apply(ctx) {
     el.appendChild(wrap);
   }
 
-  /** 明细小表（价目对照）：note + 表头三列 + 数据行；左灰标签右白色数字（原生风格） */
+  function spacerEl(h) {
+    const sp = document.createElement('div');
+    sp.style.cssText = 'height:' + h + 'px;';
+    return sp;
+  }
+
+  /** 明细小表（价目对照）：注释行 + 表头三列 + 模型分组数据行；左灰标签右白色数字（原生风格） */
   function renderTable(el, table) {
     const wrap = document.createElement('div');
     wrap.setAttribute('data-dsh-money-table', '');
-    wrap.style.cssText = 'margin-top:10px;';
-    if (table.note) {
+    wrap.style.cssText = 'margin-top:12px;';
+    const notes = Array.isArray(table.note) ? table.note : (table.note ? [table.note] : []);
+    for (const n of notes) {
       const note = document.createElement('div');
-      note.style.cssText = 'font-size:11px;color:var(--dsw-alias-label-tertiary,#7a7a85);margin-bottom:6px;';
-      note.textContent = table.note;
+      note.style.cssText = 'font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#7a7a85);';
+      note.textContent = n;
       wrap.appendChild(note);
     }
+    if (notes.length) wrap.appendChild(spacerEl(6));
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:18px;row-gap:3px;';
     (table.head || []).forEach(function (h, i) {
@@ -240,6 +248,13 @@ function apply(ctx) {
       grid.appendChild(hd);
     });
     for (const row of table.rows || []) {
+      if (row && row.group) {
+        const g = document.createElement('div');
+        g.style.cssText = 'grid-column:1 / -1;font-weight:500;color:var(--dsw-alias-label-secondary,#a0a0a8);margin-top:6px;';
+        g.textContent = row.group;
+        grid.appendChild(g);
+        continue;
+      }
       row.forEach(function (cell, i) {
         const c = document.createElement('div');
         c.style.cssText = i
@@ -413,8 +428,8 @@ function apply(ctx) {
       }
       el.appendChild(grid);
     }
-    if (spec.table) renderTable(el, spec.table);
     if (spec.clock) renderClock(el, spec.clock);
+    if (spec.table) renderTable(el, spec.table);
     if (spec.chart) renderChart(el, spec.chart);
   }
 
@@ -538,8 +553,8 @@ function apply(ctx) {
     const since = fmtDateTime(period.since);
     const next = fmtDateTime(period.nextChangeAt);
     const lines = period.peak
-      ? ['当前为高峰时段（北京时间 周一至周五 9:00-12:00、14:00-18:00，法定节假日除外）', '本次高峰：' + since + ' 起', '下次切换：' + next + ' 起为闲时']
-      : ['当前为闲时（含周末与中国法定节假日）', '本次闲时：' + since + ' 起', '下次切换：' + next + ' 起为高峰'];
+      ? ['当前计费时段：高峰', '本次高峰：' + since + ' 起', '下次切换：' + next + ' 起为闲时']
+      : ['当前计费时段：闲时', '本次闲时：' + since + ' 起', '下次切换：' + next + ' 起为高峰'];
     const out = { lines: lines.slice() };
     // 当天时刻盘（host 1.5.2+ 提供 dayMidnightAt / dayPeakWindows）
     if (typeof period.dayMidnightAt === 'number' && Array.isArray(period.dayPeakWindows)) {
@@ -555,11 +570,19 @@ function apply(ctx) {
       const unitPrice = (v) => String(parseFloat(Number(v).toFixed(6)));
       const rows = [];
       for (const t of period.prices) {
-        rows.push([t.model + ' 缓存命中', unitPrice(t.hit), unitPrice(t.hit * 2)]);
-        rows.push([t.model + ' 未命中（含写）', unitPrice(t.miss), unitPrice(t.miss * 2)]);
-        rows.push([t.model + ' 输出', unitPrice(t.out), unitPrice(t.out * 2)]);
+        rows.push({ group: t.model });
+        rows.push(['缓存命中', unitPrice(t.hit), unitPrice(t.hit * 2)]);
+        rows.push(['未命中（含写）', unitPrice(t.miss), unitPrice(t.miss * 2)]);
+        rows.push(['输出', unitPrice(t.out), unitPrice(t.out * 2)]);
       }
-      out.table = { note: 'API 单价（' + unit + ' / 百万 token，高峰为闲时 2 倍）', head: ['计费档', '闲时', '高峰'], rows: rows };
+      out.table = {
+        note: [
+          'API 单价（' + unit + ' / 百万 token，高峰 = 闲时 × 2）',
+          '计费规则：工作日 9:00-12:00、14:00-18:00 为高峰，周末与法定节假日全天基准价',
+        ],
+        head: ['计费档', '闲时', '高峰'],
+        rows: rows,
+      };
     }
     return out;
   }
