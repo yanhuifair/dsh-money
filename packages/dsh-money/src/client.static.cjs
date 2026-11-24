@@ -410,22 +410,29 @@ function apply(ctx) {
       txt.textContent = String(h);
       svg.appendChild(txt);
     }
-    // 当前时刻白线
+    // 当前时刻竖线：颜色与当前计价状态一致（高峰橙 / 闲时绿），暗色垫线保证与同色轨道的对比
     const DAY = 24 * 3600 * 1000;
     const now = typeof clock.now === 'number' ? clock.now : Date.now();
     const hour = Math.max(0, Math.min(24, (now - clock.midnight) / DAY * 24));
     const nx = X(hour).toFixed(2);
+    const under = document.createElementNS(SVG, 'line');
+    under.setAttribute('x1', nx); under.setAttribute('y1', '6');
+    under.setAttribute('x2', nx); under.setAttribute('y2', '26');
+    under.setAttribute('stroke', '#14161b');
+    under.setAttribute('stroke-width', '4.5');
+    under.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(under);
     const marker = document.createElementNS(SVG, 'line');
     marker.setAttribute('x1', nx); marker.setAttribute('y1', '7');
     marker.setAttribute('x2', nx); marker.setAttribute('y2', '25');
-    marker.setAttribute('stroke', 'var(--dsw-alias-label-primary,#f5f5f5)');
+    marker.setAttribute('stroke', clock.peak ? '#ff8f1f' : '#3fb950');
     marker.setAttribute('stroke-width', '2');
     marker.setAttribute('stroke-linecap', 'round');
     svg.appendChild(marker);
     el.appendChild(svg);
     const caption = document.createElement('div');
     caption.style.cssText = 'text-align:center;font-size:9px;line-height:12px;color:var(--dsw-alias-label-tertiary,#7a7a85);margin-bottom:2px;';
-    caption.textContent = '当天 0–24 时（北京时间）：绿=闲时、橙=高峰、白线=当前时刻';
+    caption.textContent = '当天 0–24 时（北京时间）：绿=闲时、橙=高峰、竖线=当前时刻（颜色随当前计费状态）';
     el.appendChild(caption);
   }
 
@@ -628,7 +635,7 @@ function apply(ctx) {
       const wins = period.dayPeakWindows;
       const two = (h) => String(h).padStart(2, '0');
       out.lines.push('今日高峰窗口：' + (wins.length ? wins.map((w) => two(w[0]) + ':00-' + two(w[1]) + ':00').join('、') : '全天闲时（周末/节假日）'));
-      out.clock = { midnight: period.dayMidnightAt, windows: wins, now: Date.now() };
+      out.clock = { midnight: period.dayMidnightAt, windows: wins, now: Date.now(), peak: !!period.peak };
     }
     // API 单价表：闲时/高峰对照（host 1.7.1+ 提供 prices；旧 host 自动跳过）
     if (Array.isArray(period.prices) && period.prices.length) {
