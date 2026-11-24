@@ -140,7 +140,7 @@ assert((clockSvg.attrs.viewBox || '') === '0 0 360 46', '横轴 viewBox');
 const axisTexts = dfs(clockSvg, (n) => n.tag === 'text');
 assert(axisTexts.length === 25, '0..24 每小时一个数字');
 assert(axisTexts[0].textContent === '0' && axisTexts[24].textContent === '24', '两端为 0 与 24');
-assert(dfs(clockSvg, (n) => n.tag === 'line').length === 27, '25 刻度 + 垫线 + 当前时刻线');
+assert(dfs(clockSvg, (n) => n.tag === 'line').length === 26, '25 刻度 + 1 当前时刻线');
 const mkOff = dfs(clockSvg, (n) => n.tag === 'line').slice(-1)[0];
 assert((mkOff.attrs.stroke || '') === '#3fb950', '闲时：当前时刻线=闲时绿');
 const children = tipEl.children;

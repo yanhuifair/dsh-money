@@ -410,18 +410,11 @@ function apply(ctx) {
       txt.textContent = String(h);
       svg.appendChild(txt);
     }
-    // 当前时刻竖线：颜色与当前计价状态一致（高峰橙 / 闲时绿），暗色垫线保证与同色轨道的对比
+    // 当前时刻竖线：颜色与当前计价状态一致（高峰橙 / 闲时绿）
     const DAY = 24 * 3600 * 1000;
     const now = typeof clock.now === 'number' ? clock.now : Date.now();
     const hour = Math.max(0, Math.min(24, (now - clock.midnight) / DAY * 24));
     const nx = X(hour).toFixed(2);
-    const under = document.createElementNS(SVG, 'line');
-    under.setAttribute('x1', nx); under.setAttribute('y1', '6');
-    under.setAttribute('x2', nx); under.setAttribute('y2', '26');
-    under.setAttribute('stroke', '#14161b');
-    under.setAttribute('stroke-width', '4.5');
-    under.setAttribute('stroke-linecap', 'round');
-    svg.appendChild(under);
     const marker = document.createElementNS(SVG, 'line');
     marker.setAttribute('x1', nx); marker.setAttribute('y1', '7');
     marker.setAttribute('x2', nx); marker.setAttribute('y2', '25');
