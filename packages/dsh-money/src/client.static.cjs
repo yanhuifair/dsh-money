@@ -585,13 +585,16 @@ function apply(ctx) {
     });
   }
 
-  /** 高峰徽章倒计时：距下次切换（进入闲时）的整分钟数，如「 97分」；非高峰/缺数据为空 */
+  /** 高峰徽章倒计时：距下次切换（进入闲时），格式「xx小时xx分钟」（不足 1 小时只显示分钟）；非高峰/缺数据为空 */
   function peakCountdownLabel(period, now) {
     if (!period || !period.peak) return '';
     const next = period.nextChangeAt;
     if (typeof next !== 'number' || !Number.isFinite(next)) return '';
     const mins = Math.max(0, Math.ceil((next - now) / 60000));
-    return ' ' + mins + '分';
+    if (mins < 60) return ' ' + mins + '分钟';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return ' ' + h + '小时' + (m > 0 ? m + '分钟' : '');
   }
 
   function periodLabel(period) {

@@ -218,9 +218,11 @@ assert(convPeak.includes('高峰合计: ~¥ 1.00（1 条）'), '高峰条数只�
 
 // ---------- 高峰倒计时 ----------
 const t0 = 1780000000000;
-assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 97.2 * 60000 }, t0) === ' 98分', '高峰剩余向上取整分钟');
-assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 2 * 3600000 }, t0) === ' 120分', '2 小时=120 分');
-assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 - 5000 }, t0) === ' 0分', '已过切换点钳到 0 分');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 97.2 * 60000 }, t0) === ' 1小时38分钟', '97.2 分→1小时38分钟（向上取整）');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 2 * 3600000 }, t0) === ' 2小时', '整 2 小时不带 0 分钟');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 35 * 60000 }, t0) === ' 35分钟', '不足小时只显示分钟');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 + 61 * 60000 }, t0) === ' 1小时1分钟', '61 分→1小时1分钟');
+assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 - 5000 }, t0) === ' 0分钟', '已过切换点钳到 0 分钟');
 assert(tip.peakCountdownLabel({ peak: false, nextChangeAt: t0 + 3600000 }, t0) === '', '闲时无倒计时');
 assert(tip.peakCountdownLabel({ peak: true }, t0) === '' && tip.peakCountdownLabel(null, t0) === '', '缺数据返回空');
 
