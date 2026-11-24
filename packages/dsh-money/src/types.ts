@@ -100,6 +100,8 @@ export interface MoneyWorkspacesAll {
   days: MoneyDayCost[];
   /** 最近 7 天本地模型模拟费用（与 days 同日序，供「本地」弹窗柱状图） */
   simDays: MoneyDayCost[];
+  /** 已删除会话保留下来的本地消费（总账不因删除会话而减少） */
+  retainedSimCost?: number;
   currency: string;
   workspaces: MoneyWorkspaceCost[];
 }

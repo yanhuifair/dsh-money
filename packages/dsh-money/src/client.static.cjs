@@ -861,6 +861,8 @@ function apply(ctx) {
     let simTotal = 0;
     if (wsTable && Array.isArray(wsTable.workspaces)) {
       for (const w of wsTable.workspaces) { if (w && typeof w.simCost === 'number') simTotal += w.simCost; }
+      // 已删除会话保留的本地费用也计入总账（钱已花出去）
+      if (typeof wsTable.retainedSimCost === 'number') simTotal += wsTable.retainedSimCost;
     }
     const simCur = wsTable && wsTable.currency ? wsTable.currency : 'CNY';
     let simTip = { lines: [

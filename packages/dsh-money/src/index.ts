@@ -13,6 +13,9 @@
  *  · 中国法定节假日暂按工作日计（会略微高估，见 README）
  */
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Context, Service } from '@deepseek-ai/cordis';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type {
@@ -249,7 +252,75 @@ interface LlmProviderLike {
  * dsh-money Host 服务：余额、会话/工作区费用折叠。
  * 远端命名空间 = moneyCost（client 经 ctx.remote.moneyCost.* 调用）。
  */
+/** 已删除会话的费用保留条目（钱已花出去，不随会话删除从总账消失） */
+interface RetainedEntry {
+  sim: number;
+  days: Record<string, number>;
+  simDays: Record<string, number>;
+}
+
 export default class MoneyCostService extends TypertRemoteService {
+
+  /** retained 账本内存缓存，按币种；null=未加载 */
+  private retainedCache: Record<string, Record<string, RetainedEntry>> = {};
+
+  private retainedPath(currency: string): string {
+    return path.join(os.homedir(), '.dsh-money', 'retained-' + currency + '.json');
+  }
+
+  private loadRetained(currency: string): Record<string, RetainedEntry> {
+    if (this.retainedCache[currency]) return this.retainedCache[currency];
+    let map: Record<string, RetainedEntry> = {};
+    try {
+      const raw = fs.readFileSync(this.retainedPath(currency), 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        for (const [sid, e] of Object.entries(parsed)) {
+          const v = e as Partial<RetainedEntry>;
+          if (v && typeof v === 'object') {
+            map[sid] = {
+              sim: typeof v.sim === 'number' ? v.sim : 0,
+              days: v.days && typeof v.days === 'object' ? v.days : {},
+              simDays: v.simDays && typeof v.simDays === 'object' ? v.simDays : {},
+            };
+          }
+        }
+      }
+    } catch (e) { /* 无账本或损坏：从空账本开始 */ }
+    this.retainedCache[currency] = map;
+    return map;
+  }
+
+  /** 记住/刷新某会话本次折叠出的费用（供其被删除后继续计入总账） */
+  private rememberFold(retained: Record<string, RetainedEntry>, sid: string, fold: { simCost: number | null; days: Record<string, number>; simDays: Record<string, number> }): boolean {
+    const hasCost = fold.simCost != null || Object.keys(fold.days).length > 0 || Object.keys(fold.simDays).length > 0;
+    if (!hasCost) return false;
+    const next: RetainedEntry = { sim: fold.simCost ?? 0, days: { ...fold.days }, simDays: { ...fold.simDays } };
+    const cur = retained[sid];
+    if (cur && cur.sim === next.sim && JSON.stringify(cur.days) === JSON.stringify(next.days) && JSON.stringify(cur.simDays) === JSON.stringify(next.simDays)) return false;
+    retained[sid] = next;
+    return true;
+  }
+
+  /** 原子写回账本；days 修剪到最近 8 天（7 天图之外无消费价值，总量字段永久保留） */
+  private saveRetained(currency: string, retained: Record<string, RetainedEntry>): void {
+    try {
+      const keepFrom = dayKeyBeijing(Date.now() - 8 * DAY_MS);
+      const pruned: Record<string, RetainedEntry> = {};
+      for (const [sid, e] of Object.entries(retained)) {
+        const days: Record<string, number> = {};
+        for (const [dk, v] of Object.entries(e.days)) { if (dk >= keepFrom) days[dk] = v; }
+        const simDays: Record<string, number> = {};
+        for (const [dk, v] of Object.entries(e.simDays)) { if (dk >= keepFrom) simDays[dk] = v; }
+        pruned[sid] = { sim: e.sim, days, simDays };
+      }
+      const file = this.retainedPath(currency);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(pruned));
+      fs.renameSync(tmp, file);
+    } catch (e) { /* 写失败不影响本次统计 */ }
+  }
   /** 显示货币设置（进程内记忆）：'auto' | 'CNY' | 'USD' */
   private currencySetting: 'auto' | 'CNY' | 'USD' = 'auto';
   private balanceCache: { at: number; value: MoneyBalanceInfo | null } = { at: 0, value: null };
@@ -277,7 +348,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.9.5',
+        version: '1.10.0',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -579,20 +650,23 @@ export default class MoneyCostService extends TypertRemoteService {
   }
 
   /** 全量工作区费用表 */
-  private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<{ workspaces: MoneyWorkspaceCost[]; days: MoneyDayCost[]; simDays: MoneyDayCost[] }> {
+  private async allWorkspaceCosts(currency: 'CNY' | 'USD'): Promise<{ workspaces: MoneyWorkspaceCost[]; days: MoneyDayCost[]; simDays: MoneyDayCost[]; retainedSimCost: number }> {
     const registry = this.ctx.get('workspaceRegistry') as
       | { list(): Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> }
       | undefined;
-    if (!registry || typeof registry.list !== 'function') return { workspaces: [], days: emptyDays(), simDays: emptyDays() };
+    if (!registry || typeof registry.list !== 'function') return { workspaces: [], days: emptyDays(), simDays: emptyDays(), retainedSimCost: 0 };
     let list: Array<{ id?: unknown; title?: unknown; sessionIds?: unknown }> = [];
     try {
       list = registry.list();
     } catch (e) {
-      return { workspaces: [], days: emptyDays(), simDays: emptyDays() };
+      return { workspaces: [], days: emptyDays(), simDays: emptyDays(), retainedSimCost: 0 };
     }
     const workspaces: MoneyWorkspaceCost[] = [];
     const dayTotals: Record<string, number> = {};
     const dayTotalsSim: Record<string, number> = {};
+    const retained = this.loadRetained(currency);
+    const seenSids = new Set<string>();
+    let retainedDirty = false;
     for (const w of list) {
       const sessionIds = Array.isArray(w.sessionIds) ? (w.sessionIds as string[]) : [];
       let total = 0;
@@ -604,7 +678,9 @@ export default class MoneyCostService extends TypertRemoteService {
       let simTotal = 0;
       let hasSim = false;
       for (const sid of sessionIds) {
+        seenSids.add(sid);
         const fold = await this.foldSession(sid, currency);
+        if (this.rememberFold(retained, sid, fold)) retainedDirty = true;
         for (const [dayKey, dayCost] of Object.entries(fold.days)) {
           dayTotals[dayKey] = (dayTotals[dayKey] || 0) + dayCost;
         }
@@ -640,6 +716,14 @@ export default class MoneyCostService extends TypertRemoteService {
     }
     // 最近 7 个自然日（含今天，新→旧）
     const now = Date.now();
+    // 已删除会话：仍计入总账（本地合计徽章 + 两张 7 天图；不出现在工作区行）
+    let retainedSimCost = 0;
+    for (const [sid, e] of Object.entries(retained)) {
+      if (seenSids.has(sid)) continue;
+      retainedSimCost += e.sim || 0;
+      for (const [dk, v] of Object.entries(e.days)) { dayTotals[dk] = (dayTotals[dk] || 0) + v; }
+      for (const [dk, v] of Object.entries(e.simDays)) { dayTotalsSim[dk] = (dayTotalsSim[dk] || 0) + v; }
+    }
     const days: MoneyDayCost[] = [];
     for (let i = 0; i < 7; i++) {
       const dayKey = dayKeyBeijing(now - i * DAY_MS);
@@ -652,7 +736,8 @@ export default class MoneyCostService extends TypertRemoteService {
       const mmdd = dayKey.slice(5);
       simDays.push({ date: mmdd, cost: roundCost(dayTotalsSim[dayKey] || 0) });
     }
-    return { workspaces, days, simDays };
+    if (retainedDirty) this.saveRetained(currency, retained);
+    return { workspaces, days, simDays, retainedSimCost: roundCost(retainedSimCost) };
   }
 
   /** 读取/设置显示币种 */

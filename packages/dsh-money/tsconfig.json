@@ -21,6 +21,7 @@
   "include": [
     "src/index.ts",
     "src/client.ts",
-    "src/types.ts"
+    "src/types.ts",
+    "src/*.d.ts"
   ]
 }
