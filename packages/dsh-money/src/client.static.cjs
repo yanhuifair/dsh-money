@@ -283,7 +283,8 @@ function apply(ctx) {
     head.appendChild(hl);
     head.appendChild(hv);
     el.appendChild(head);
-    const days = (Array.isArray(chart.days) ? chart.days : []).slice(0, 7);
+    // host 返回新→旧；柱状图按时间轴左旧右新渲染
+    const days = (Array.isArray(chart.days) ? chart.days.slice() : []).slice(0, 7).reverse();
     if (!days.length) return;
     let max = 0;
     for (const d of days) { if (d && typeof d.cost === 'number' && d.cost > max) max = d.cost; }

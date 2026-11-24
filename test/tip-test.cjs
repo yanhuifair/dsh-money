@@ -226,5 +226,13 @@ assert(tip.peakCountdownLabel({ peak: true, nextChangeAt: t0 - 5000 }, t0) === '
 assert(tip.peakCountdownLabel({ peak: false, nextChangeAt: t0 + 3600000 }, t0) === '', '闲时无倒计时');
 assert(tip.peakCountdownLabel({ peak: true }, t0) === '' && tip.peakCountdownLabel(null, t0) === '', '缺数据返回空');
 
+// ---------- 柱状图日期顺序（左旧右新）----------
+const chartTip = { lines: ['账号剩余金额: ¥ 10.00'], chart: { total: 3, currency: 'CNY', days: [
+  { date: '11-23', cost: 1 }, { date: '11-22', cost: 1 }, { date: '11-21', cost: 1 },
+] } };
+tip.renderTip(chartTip);
+const dayLabels = dfs(tipEl, (n) => n.attrs && n.attrs['data-dsh-money-bars'] !== undefined)
+  .flatMap((wrap) => (wrap.children || []).flatMap((col) => (col.children || []).map((c) => c.textContent || '').filter((t) => /^\d\d-\d\d$/.test(t))));
+assert(dayLabels.length === 3 && dayLabels[0] === '11-21' && dayLabels[2] === '11-23', '柱状图左旧右新（11-21 … 11-23）');
 console.log('\n' + pass + ' PASS, ' + fail + ' FAIL');
 process.exit(fail ? 1 : 0);
