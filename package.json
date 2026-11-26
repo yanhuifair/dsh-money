@@ -10,7 +10,9 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node test/tip-test.cjs && node test/host-test.mjs"
+    "test": "node test/tip-test.cjs && node test/host-test.mjs",
+    "publish:pkg": "cd packages/dsh-money && npm publish --access public",
+    "publish:dry": "cd packages/dsh-money && npm publish --dry-run --access public"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
