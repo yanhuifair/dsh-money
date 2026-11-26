@@ -34,9 +34,6 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 测试（client 展示层 + host 计价/时段/账本回归）
-        run: npm test
-
       - name: 校验版本号与 tag 一致（仅 tag 触发时）
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -61,6 +58,9 @@ jobs:
 
       - name: 构建（生成 lib/ 产物）
         run: npm run build
+
+      - name: 测试（client 展示层 + host 计价/时段/账本回归）
+        run: npm test
 
       - name: 检查发布内容
         run: |
