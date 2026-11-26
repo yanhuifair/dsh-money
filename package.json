@@ -11,8 +11,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node test/tip-test.cjs && node test/host-test.mjs",
-    "publish:pkg": "cd packages/dsh-money && npm publish --access public",
-    "publish:dry": "cd packages/dsh-money && npm publish --dry-run --access public"
+    "publish:pkg": "npm publish -w dsh-money --access public",
+    "publish:dry": "npm publish -w dsh-money --access public --dry-run",
+    "prepublishOnly": "echo '❌ 仓库根目录（dsh-money-monorepo）不发布。private:true 是保护，不是错误。' && echo '   发布插件包请执行： npm run publish:pkg' && echo '   （等价命令： npm publish -w dsh-money --access public）' && exit 1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
