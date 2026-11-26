@@ -880,7 +880,7 @@ function apply(ctx) {
         key: 'sim',
         'aria-label': '本地模型消费',
         ...tipProps(simTip),
-        style: { ...badgeStyle, ...simBadgeStyle, marginLeft: '4px' },
+        style: { ...badgeStyle, ...simBadgeStyle },
       }, '本地 ' + fmtMoney(simTotal, simCur))
       : null;
     const period = balancePeriod
@@ -888,12 +888,15 @@ function apply(ctx) {
         key: 'period',
         'aria-label': periodLabel(balancePeriod) + '时段' + peakCountdownLabel(balancePeriod, Date.now()),
         ...tipProps(periodTooltip(balancePeriod, wsTable && wsTable.currency ? wsTable.currency : 'CNY')),
-        style: { ...periodBadgeStyle(balancePeriod.peak), marginLeft: '4px' },
+        style: periodBadgeStyle(balancePeriod.peak),
       }, periodLabel(balancePeriod) + peakCountdownLabel(balancePeriod, Date.now()))
       : null;
+    // 两行排版：第一行金额徽章，第二行计价时段徽章（含倒计时），互不挤压
     return React.createElement('span', {
-      style: { display: 'inline-flex', alignItems: 'center', gap: '4px' },
-    }, money, simBadge, period);
+      style: { display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px' },
+    },
+      React.createElement('span', { key: 'row-amounts', style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } }, money, simBadge),
+      period);
   }
 
   // ---- 侧边栏工作区行费用（DOM 注入：0.2.x 无工作区行 Slot）----
