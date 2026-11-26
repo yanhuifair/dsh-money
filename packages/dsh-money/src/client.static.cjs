@@ -24,6 +24,17 @@ const React = require('react');
 /** 依赖注入：slots 槽位注册、remote 命名空间、timer 定时器（moneyCost 由入口挂载） */
 const inject = ['slots', 'remote', 'timer'];
 
+/**
+ * 跨 apply / 跨模块实例的注册去重表：client 半段可能被多次 apply（热重载、
+ * 插件开关、ctx.inject 回调重入），而 slot id 与全局监听器是进程级唯一资源。
+ * 挂在 globalThis 上，模块被重新求值也不会丢失；卸载时由 cleanup 复位，允许再次注册。
+ */
+const REG = (function () {
+  const host = typeof globalThis !== 'undefined' ? globalThis : {};
+  const key = '__dshMoneyClientRegistry';
+  return host[key] || (host[key] = { slots: new Set(), started: false });
+})();
+
 function apply(ctx) {
   const remote = ctx && ctx.remote ? ctx.remote.moneyCost : null;
   if (!remote) return;
@@ -545,7 +556,9 @@ function apply(ctx) {
   function tipProps(text) {
     return {
       role: 'button',
+      tabIndex: 0,
       'aria-haspopup': 'dialog',
+      'aria-expanded': 'false',
       onClick: (e) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
         toggleTip(text, e && e.currentTarget ? e.currentTarget : e && e.target);
@@ -571,18 +584,38 @@ function apply(ctx) {
   function onDocKeyDown(e) {
     if (e && e.key === 'Escape') hideTip();
   }
+  let reflowFrame = 0;
   function onReflow() {
-    if (tipAnchor) placeTip();
+    if (!tipAnchor) return;
+    // 滚动/缩放事件密度高，逐事件 getBoundingClientRect 会强制回流；合并到每帧一次
+    if (reflowFrame || typeof requestAnimationFrame !== 'function') {
+      if (!reflowFrame) placeTip();
+      return;
+    }
+    reflowFrame = requestAnimationFrame(() => {
+      reflowFrame = 0;
+      if (tipAnchor) placeTip();
+    });
   }
 
   /** DOM 注入徽章的等价监听（一次性绑定，文案由 badge.__dshMoneyTip 提供） */
   function bindTip(badge) {
     if (badge.__dshMoneyBound) return;
     badge.__dshMoneyBound = true;
-    badge.addEventListener('click', (e) => {
+    try {
+      badge.setAttribute('role', 'button');
+      badge.setAttribute('tabindex', '0');
+      badge.setAttribute('aria-haspopup', 'dialog');
+      badge.setAttribute('aria-expanded', 'false');
+    } catch (e) {}
+    const open = (e) => {
       if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
       if (e && typeof e.preventDefault === 'function') e.preventDefault();
       toggleTip(badge.__dshMoneyTip, badge);
+    };
+    badge.addEventListener('click', open);
+    badge.addEventListener('keydown', (e) => {
+      if (e && (e.key === 'Enter' || e.key === ' ')) open(e);
     });
   }
 
@@ -592,6 +625,7 @@ function apply(ctx) {
     const next = period.nextChangeAt;
     if (typeof next !== 'number' || !Number.isFinite(next)) return '';
     const mins = Math.max(0, Math.ceil((next - now) / 60000));
+    if (mins <= 0) return ' 即将切换';
     if (mins < 60) return ' ' + mins + '分钟';
     const h = Math.floor(mins / 60);
     const m = mins % 60;
@@ -801,7 +835,7 @@ function apply(ctx) {
     remote.balance()
       .then((res) => {
         const value = res && res.ok === true ? res.value : (res && res.error ? null : res);
-        if (value && typeof value === 'object') {
+        if (value && typeof value === 'object' && !value.error) {
           balance = value.balance || null;
           if (value.period && typeof value.period.peak === 'boolean') balancePeriod = value.period;
           balanceLoaded = true;
@@ -901,7 +935,6 @@ function apply(ctx) {
 
   // ---- 侧边栏工作区行费用（DOM 注入：0.2.x 无工作区行 Slot）----
   let observer = null;
-  let started = false;
   let applying = false;
   let wsTable = null;
   let wsDays = null; // 最近 7 天消费（host workspacesAll 顺路返回）
@@ -1002,8 +1035,8 @@ function apply(ctx) {
   }
 
   function startSidebarObserver() {
-    if (started) return;
-    started = true;
+    if (REG.started) return;
+    REG.started = true;
     loadUiSettings();
     loadWsTable();
     loadBalance();
@@ -1051,6 +1084,20 @@ function apply(ctx) {
     }
     if (observer) { try { observer.disconnect(); } catch (e) {} observer = null; }
     if (periodTimer) { clearTimeout(periodTimer); periodTimer = null; }
+    // 注入到宿主行的徽章连同其节点监听器（旧闭包）一起移除，否则禁用/热重载后
+    // 残留徽章会继续显示陈旧金额，且点击弹出的浮层因全局监听已解绑而关不掉
+    if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+      try {
+        const injected = document.querySelectorAll('.dsh-money-ws-badge, .dsh-money-ws-sim');
+        for (const node of Array.from(injected)) {
+          node.__dshMoneyBound = false;
+          node.__dshMoneyTip = undefined;
+          if (node.parentNode) node.parentNode.removeChild(node);
+        }
+      } catch (e) {}
+    }
+    REG.started = false;
+    REG.slots.clear();
     hideTip();
     if (tipEl && tipEl.parentNode) { try { tipEl.parentNode.removeChild(tipEl); } catch (e) {} }
     tipEl = null;
@@ -1156,12 +1203,11 @@ function apply(ctx) {
     );
   }
 
-  // 注册 UI（防重复：client 插件可能被多次 apply，重复注册会抛 id 冲突）
-  const registeredSlots = new Set();
+  // 注册 UI（去重表挂在 globalThis，跨 apply 生效：重复注册同 id 会抛冲突并中断后续注入）
   function injectSlot(name, id, order, factory) {
     const key = name + '::' + id;
-    if (registeredSlots.has(key)) return;
-    registeredSlots.add(key);
+    if (REG.slots.has(key)) return;
+    REG.slots.add(key);
     ctx.slots.inject(name, () => ctx.slots.register(
       { name, id, order },
       factory,

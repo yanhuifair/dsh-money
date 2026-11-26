@@ -34,6 +34,9 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 测试（client 展示层 + host 计价/时段/账本回归）
+        run: npm test
+
       - name: 校验版本号与 tag 一致（仅 tag 触发时）
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -43,7 +46,18 @@ jobs:
             echo "❌ packages/dsh-money/package.json 版本 ($PKG_VERSION) 与 tag 版本 ($TAG_VERSION) 不一致"
             exit 1
           fi
-          echo "✅ 版本一致: v$PKG_VERSION"
+          ROOT_VERSION=$(node -p "require('./package.json').version")
+          if [ "$ROOT_VERSION" != "$PKG_VERSION" ]; then
+            echo "❌ 根 package.json 版本 ($ROOT_VERSION) 与 packages/dsh-money 版本 ($PKG_VERSION) 不一致"
+            exit 1
+          fi
+          LOCK_VERSION=$(node -p "require('./package-lock.json').version")
+          if [ "$LOCK_VERSION" != "$PKG_VERSION" ]; then
+            echo "❌ package-lock.json 版本 ($LOCK_VERSION) 与包版本 ($PKG_VERSION) 不一致（会让 npm ci 直接失败）"
+            echo "   修复：在有网机器执行 npm install --package-lock-only 后提交"
+            exit 1
+          fi
+          echo "✅ 版本一致: v$PKG_VERSION（root / pkg / lock 三方对齐）"
 
       - name: 构建（生成 lib/ 产物）
         run: npm run build

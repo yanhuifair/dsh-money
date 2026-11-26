@@ -10,7 +10,7 @@
  *  · 模型：deepseek-flash（旧名 deepseek-v4-flash 仍按 Flash 计费）、deepseek-v4-pro
  *  · 高峰时段 = 北京时间周一至周五 9:00-12:00、14:00-18:00，价格 = 空闲价 × 2
  *  · 账单 = 未命中输入(含 cache write) × miss 价 + 缓存命中 × hit 价 + 输出 × out 价
- *  · 中国法定节假日暂按工作日计（会略微高估，见 README）
+ *  · 中国法定节假日全天按闲时（基准价）计，周末同样闲时；假日表仅覆盖已录入年份，未录入年份按工作日处理
  */
 
 import * as fs from 'node:fs';
@@ -51,6 +51,9 @@ const MODEL_ALIASES: Record<string, string> = {
   'deepseek-v4-flash': 'deepseek-flash',
   'deepseek-v4-flash-vision-exp': 'deepseek-flash',
 };
+
+/** 折叠缓存最多保留的会话数（超出按最近使用逐出） */
+const FOLD_CACHE_MAX = 200;
 
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,7 +98,7 @@ function beijingClock(ms: number): { day: number; hour: number; date: string } {
  * 高峰时段（官方口径）：北京时间周一至周五 9:00-12:00、14:00-18:00，
  * 且不含中国法定节假日——节假日全天、周末全天均为闲时（含调休上班的周末）。
  */
-function isPeak(ms: number): boolean {
+export function isPeak(ms: number): boolean {
   const { day, hour, date } = beijingClock(ms);
   if (day === 0 || day === 6) return false;
   if (CN_HOLIDAYS.has(date)) return false;
@@ -103,11 +106,12 @@ function isPeak(ms: number): boolean {
 }
 
 /** 下一次时段切换的时间戳：在未来的北京时间 0/9/12/14/18 点中找第一个状态不同者 */
-function nextPeriodChange(ms: number): number {
+export function nextPeriodChange(ms: number): number {
   const current = isPeak(ms);
   const DAY = 24 * 60 * 60 * 1000;
   const dayStart = Math.floor((ms + BEIJING_OFFSET_MS) / DAY) * DAY - BEIJING_OFFSET_MS;
-  for (let offset = 0; offset <= 8; offset++) {
+  // 扫描窗口需覆盖最长连续闲时（2026 春节 + 周末连休约 10.6 天），取 45 天留足余量
+  for (let offset = 0; offset <= 45; offset++) {
     for (const hour of [0, 9, 12, 14, 18]) {
       const at = dayStart + offset * DAY + hour * 60 * 60 * 1000;
       if (at <= ms) continue;
@@ -121,10 +125,10 @@ function nextPeriodChange(ms: number): number {
  * 当前时段开始的时间戳：向前找最近一次状态翻转的北京时间边界（0/9/12/14/18 点）。
  * 判定边界时比较该点与前 1ms 的状态，因此 9:00 开始的高峰能正确识别为 9:00 起。
  */
-function periodStart(ms: number): number {
+export function periodStart(ms: number): number {
   const DAY = 24 * 60 * 60 * 1000;
   const dayStart = Math.floor((ms + BEIJING_OFFSET_MS) / DAY) * DAY - BEIJING_OFFSET_MS;
-  for (let offset = 0; offset <= 8; offset++) {
+  for (let offset = 0; offset <= 45; offset++) {
     const base = dayStart - offset * DAY;
     for (const hour of [18, 14, 12, 9, 0]) {
       const at = base + hour * 60 * 60 * 1000;
@@ -136,7 +140,7 @@ function periodStart(ms: number): number {
 }
 
 /** 今天（北京时间自然日）的高峰小时区间：工作日且非节假日 → 9-12、14-18，否则空 */
-function dayPeakWindows(midnightMs: number): number[][] {
+export function dayPeakWindows(midnightMs: number): number[][] {
   const d = new Date(midnightMs + BEIJING_OFFSET_MS);
   const weekday = d.getUTCDay();
   if (weekday === 0 || weekday === 6) return [];
@@ -146,7 +150,7 @@ function dayPeakWindows(midnightMs: number): number[][] {
 }
 
 /** 当前时段快照（高峰/闲时 + 本段起点 + 下次切换时间 + 今日时刻盘数据） */
-function currentPeriod(currency: 'CNY' | 'USD' = 'CNY', ms: number = Date.now()): MoneyPeriod {
+export function currentPeriod(currency: 'CNY' | 'USD' = 'CNY', ms: number = Date.now()): MoneyPeriod {
   const dayMidnight = Math.floor((ms + BEIJING_OFFSET_MS) / DAY_MS) * DAY_MS - BEIJING_OFFSET_MS;
   const table = PRICES[currency] || PRICES.CNY;
   return {
@@ -171,7 +175,7 @@ function emptyDays(): MoneyDayCost[] {
 }
 
 /** 北京时间自然日键：YYYY-MM-DD */
-function dayKeyBeijing(ms: number): string {
+export function dayKeyBeijing(ms: number): string {
   const d = new Date(ms + BEIJING_OFFSET_MS);
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -184,7 +188,7 @@ function modelOf(model: string): string {
   return MODEL_ALIASES[key] ?? key;
 }
 
-function priceOf(
+export function priceOf(
   model: string,
   ms: number,
   currency: string,
@@ -197,7 +201,7 @@ function priceOf(
 }
 
 /** 费用内部计算精度：保留小数点后 8 位（显示层再取 2 位） */
-function roundCost(x: number): number {
+export function roundCost(x: number): number {
   return Math.round(x * 1e8) / 1e8;
 }
 
@@ -207,7 +211,7 @@ function simPrice(currency: string, ms: number): { hit: number; miss: number; ou
 }
 
 /** 账单口径：未命中输入(含 cache write) x miss 价 + 命中 x hit 价 + 输出 x out 价 */
-function costOf(
+export function costOf(
   usage: Record<string, unknown>,
   price: { hit: number; miss: number; out: number } | null,
 ): number | null {
@@ -348,7 +352,7 @@ export default class MoneyCostService extends TypertRemoteService {
     let details: AccountDetailsLike | null = null;
     try {
       details = await account.getBalance({
-        version: '1.10.1',
+        version: '1.10.2',
         locale: 'zh-CN',
         timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
       });
@@ -471,17 +475,27 @@ export default class MoneyCostService extends TypertRemoteService {
     return this.apiKeyBalance();
   }
 
+  private balanceInflight: Promise<MoneyBalanceInfo | null> | null = null;
+
   private async cachedBalance(): Promise<MoneyBalanceInfo | null> {
     const now = Date.now();
-    if (this.balanceCache.value && now - this.balanceCache.at < 60000) return this.balanceCache.value;
-    let value: MoneyBalanceInfo | null = null;
-    try {
-      value = await this.fetchBalance();
-    } catch (e) {
-      value = null;
-    }
-    this.balanceCache = { at: now, value };
-    return value;
+    // 成功缓存 60s；失败也缓存 30s（负缓存），避免断网 / 密钥失效时每周期重打两跳请求
+    const ttl = this.balanceCache.value ? 60000 : 30000;
+    if (now - this.balanceCache.at < ttl) return this.balanceCache.value;
+    if (this.balanceInflight) return this.balanceInflight;
+    // 单飞：同一时刻多个 Remote 调用共用一次余额请求
+    const run: Promise<MoneyBalanceInfo | null> = this.fetchBalance()
+      .then((value) => value ?? null)
+      .catch(() => null)
+      .then((value) => {
+        this.balanceCache = { at: Date.now(), value };
+        return value;
+      })
+      .finally(() => {
+        if (this.balanceInflight === run) this.balanceInflight = null;
+      });
+    this.balanceInflight = run;
+    return run;
   }
 
   /** 解析实际显示币种：手动设置优先，自动则跟随余额币种（非美元一律人民币） */
@@ -517,21 +531,26 @@ export default class MoneyCostService extends TypertRemoteService {
         ? { replies: cached.replies, conversationCost: cached.conversationCost, peakCost: cached.peakCost, offPeakCost: cached.offPeakCost, simCost: cached.simCost, days: { ...cached.days }, simDays: { ...(cached.simDays || {}) } }
         : empty;
     }
-    // 增量：从缓存的 lastSeq 之后继续；无缓存则全量
-    const fromSeq = cached ? cached.lastSeq : -1;
-    const freshReplies: MoneyReplyCost[] = cached ? [...cached.replies] : [];
-    const carried = {
-      conversationCost: cached ? cached.conversationCost : null,
-      peakCost: cached ? cached.peakCost : null,
-      offPeakCost: cached ? cached.offPeakCost : null,
-      simCost: cached ? cached.simCost : null,
-    };
-    // 只处理 seq > fromSeq 的新增事件
-    const newEvents = fromSeq >= 0 ? events.filter((e) => (e && typeof e.seq === 'number' ? e.seq > fromSeq : true)) : events;
-    const daysOut: Record<string, number> = cached ? { ...cached.days } : {};
-    const daysSimOut: Record<string, number> = cached && cached.simDays ? { ...cached.simDays } : {};
+    // 增量：只在缓存带有可用 seq 时续折；无 seq（旧日志/损坏）一律整段重折，
+    // 否则缺 seq 的事件每次刷新都被重复累加，费用与 replies 会成倍膨胀。
+    const incremental = !!cached && cached.lastSeq >= 0;
+    const fromSeq = incremental ? cached!.lastSeq : -1;
+    const freshReplies: MoneyReplyCost[] = incremental ? [...cached!.replies] : [];
+    const carried = incremental
+      ? {
+          conversationCost: cached!.conversationCost,
+          peakCost: cached!.peakCost,
+          offPeakCost: cached!.offPeakCost,
+          simCost: cached!.simCost,
+        }
+      : { conversationCost: null, peakCost: null, offPeakCost: null, simCost: null };
+    // 只处理 seq > fromSeq 的新增事件；缺 seq 的事件在增量模式下跳过（全量模式已折过）
+    const newEvents = incremental ? events.filter((e) => e && typeof e.seq === 'number' && e.seq > fromSeq) : events;
+    const daysOut: Record<string, number> = incremental ? { ...cached!.days } : {};
+    const daysSimOut: Record<string, number> = incremental && cached!.simDays ? { ...cached!.simDays } : {};
     const fold = await this.foldEvents(newEvents, currency, freshReplies, carried, daysOut, daysSimOut);
-    // 更新缓存（重置 TTL）
+    // 更新缓存（按最近使用排序，超出上限逐出最早条目；无 TTL，靠上限控内存）
+    this.foldCache.delete(key);
     this.foldCache.set(key, {
       replies: fold.replies,
       conversationCost: fold.conversationCost,
@@ -542,6 +561,11 @@ export default class MoneyCostService extends TypertRemoteService {
       simDays: daysSimOut,
       lastSeq: this.maxSeq(events),
     });
+    while (this.foldCache.size > FOLD_CACHE_MAX) {
+      const oldest = this.foldCache.keys().next();
+      if (oldest.done) break;
+      this.foldCache.delete(oldest.value);
+    }
     return { ...fold, days: daysOut, simDays: daysSimOut };
   }
 
@@ -801,8 +825,8 @@ export default class MoneyCostService extends TypertRemoteService {
   async workspacesAll(): Promise<MoneyWorkspacesAll> {
     const balance = await this.cachedBalance();
     const currency = this.resolveCurrency(balance);
-    const { workspaces, days, simDays } = await this.allWorkspaceCosts(currency);
-    return { currency, workspaces, days, simDays };
+    const { workspaces, days, simDays, retainedSimCost } = await this.allWorkspaceCosts(currency);
+    return { currency, workspaces, days, simDays, retainedSimCost };
   }
 }
 

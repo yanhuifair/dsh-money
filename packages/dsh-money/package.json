@@ -1,6 +1,6 @@
 {
   "name": "dsh-money",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "description": "DeepSeek Harness 费用追踪插件：显示账号余额、当前对话费用与每次回复费用，金色标签风格，支持币种切换",
   "license": "AGPL-3.0",
   "publishConfig": {
@@ -78,8 +78,8 @@
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-api-remotes": "^0.2.1-rc.5"
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.2-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-api-remotes": ">=0.2.2-rc.5 <0.3.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
@@ -93,6 +93,9 @@
     "zod": "4.6.6"
   },
   "engines": {
-    "dsh": "^0.2.1-rc.5"
+    "dsh": ">=0.2.2-rc.5 <0.3.0"
+  },
+  "author": {
+    "name": "yanhuifair"
   }
 }
