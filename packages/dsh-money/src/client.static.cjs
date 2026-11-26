@@ -203,10 +203,10 @@ function apply(ctx) {
   const badgeStyle = {
     color: GOLD,
     fontSize: '11px',
-    padding: '0 6px',
+    padding: '5px',
     borderRadius: '8px',
     background: 'var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.12))',
-    lineHeight: '18px',
+    lineHeight: '11px',
     whiteSpace: 'nowrap',
     cursor: 'pointer',
   };
@@ -854,7 +854,7 @@ function apply(ctx) {
     if (!wide) {
       // 56px 折叠态：只显示币种符号，避免挤压设置按钮
       const sym = balance && balance.currency === 'USD' ? '$' : '¥';
-      return React.createElement('span', { 'aria-label': '账号剩余金额', ...tipProps(tip), style: { ...badgeStyle, fontSize: '10px', padding: '0 4px' } }, sym);
+      return React.createElement('span', { 'aria-label': '账号剩余金额', ...tipProps(tip), style: { ...badgeStyle, fontSize: '10px', padding: '4px', lineHeight: '10px' } }, sym);
     }
     const money = React.createElement('span', { key: 'money', 'aria-label': '账号剩余金额', ...tipProps(tip), style: badgeStyle }, '余额 ' + amount);
     // 本地模型模拟消费徽章（白色）：汇总各工作区 simCost，点击看说明
@@ -966,7 +966,7 @@ function apply(ctx) {
           if (!badge) {
             badge = document.createElement('span');
             badge.className = 'dsh-money-ws-badge';
-            badge.style.cssText = 'color:#f0c11d;font-size:11px;padding:0 4px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;cursor:pointer;';
+            badge.style.cssText = 'color:#f0c11d;font-size:11px;padding:4px;line-height:11px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;cursor:pointer;';
             bindTip(badge);
             row.appendChild(badge);
           }
@@ -983,7 +983,7 @@ function apply(ctx) {
           if (!simBadgeEl) {
             simBadgeEl = document.createElement('span');
             simBadgeEl.className = 'dsh-money-ws-sim';
-            simBadgeEl.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);font-size:11px;padding:0 4px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;cursor:pointer;';
+            simBadgeEl.style.cssText = 'color:var(--dsw-alias-label-primary,#f5f5f5);font-size:11px;padding:4px;line-height:11px;border-radius:8px;background:rgba(128,128,128,0.12);margin-left:4px;flex:none;white-space:nowrap;cursor:pointer;';
             bindTip(simBadgeEl);
             row.appendChild(simBadgeEl);
           }
