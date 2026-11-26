@@ -69,6 +69,8 @@ export interface MoneyCostOverview {
     cost: number | null;
     model: string;
     peak: boolean;
+    /** true 表示该条按「本地」模拟计价（未计价模型），不计入 API 消费 */
+    sim?: boolean;
     tokens: MoneyTokens;
   }>;
 }
